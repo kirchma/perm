@@ -2,8 +2,9 @@ import pandas as pd
 import numpy as np
 import os
 from matplotlib import pyplot as plt
-from scipy.interpolate import interp1d
 import scipy.sparse
+import scipy.sparse.linalg
+from scipy.interpolate import interp1d
 import CoolProp.CoolProp as CP
 
 
@@ -29,9 +30,10 @@ class MeasurementData:
 
         plot_before_adjustment = Plotter(converted_data,
                                          **{'start': self.start, 'stop': self.stop, 'name': self.filename})
-        plot_before_adjustment.plot_measurement_chart()
+        # TODO plot
+        # plot_before_adjustment.plot_measurement_chart()
         plot_after_adjustment = Plotter(final_data, **{'name': self.filename})
-        plot_after_adjustment.plot_measurement_chart()
+        # plot_after_adjustment.plot_measurement_chart()
         return final_data
 
     @staticmethod
@@ -103,7 +105,8 @@ class MeasurementData:
         data_log_scale = pd.DataFrame(np.array([log_time_scale, inlet_pressure_log_scale,
                                                 outlet_pressure_log_scale, temperature_log_scale]).T,
                                       columns=['Duration', 'Inlet_Pressure', 'Outlet_Pressure', 'Temperature'])
-        data_log_scale.to_csv('test.csv', index=False, float_format='%.4f', sep='\t')
+        # TODO kann nach Test entfernt werden
+        # data_log_scale.to_csv('test.csv', index=False, float_format='%.4f', sep='\t')
         return data_log_scale
 
     @staticmethod
@@ -128,21 +131,23 @@ class MeasurementData:
         database.set_index('name', inplace=True)
         length = database.loc[self.filename, 'length']
         diameter = database.loc[self.filename, 'diameter']
+        area = np.pi * 0.25 * diameter**2
         gas = database.loc[self.filename, 'gas']
         my_dict = {'length': length,
-                   'diameter': diameter,
+                   'area': area,
                    'gas': gas}
         return my_dict
 
     def get_chamber_volume(self):
         database = self.read_file('database.csv')
         all_units = self.read_file('measurement_units.csv')
+        ml_to_m3 = 1e-6
 
         database.set_index('name', inplace=True)
         used_unit = database.loc[self.filename, 'unit']
         filt = all_units['number'] == used_unit
         chamber_volume = all_units.loc[filt, ['inlet_chamber_in_ml', 'outlet_chamber_in_ml']]
-        return chamber_volume.values[0]
+        return chamber_volume.values[0] * ml_to_m3
 
 
 class Plotter:
@@ -170,18 +175,22 @@ class Plotter:
         plt.show()
 
     def plot_calculation_chart(self):
-        pass
+        fig = plt.figure(figsize=(14, 8))
+        ax = fig.add_subplot(111)
+        plt.semilogx(self.df['Duration'], self.df['Inlet_Pressure'], color='C0', linestyle='-', label='Messwerte')
+        plt.semilogx(self.df['Duration'], self.df['Outlet_Pressure'], color='C0', linestyle='-')
+        plt.scatter(self.df['Duration'], self.calc_data['Inlet_Pressure'] * 1e-6, color='r', s=3, label='Rechenwerte')
+        plt.scatter(self.df['Duration'], self.calc_data['Outlet_Pressure'] * 1e-6, color='r', s=3)
+        plt.legend()
+        plt.show()
 
-    def plot_calculation_detail_chart(self):
-        pass
 
-
-class DiffusionEquation:
+class LinearSystem:
     number_of_cells = 51
 
     def __init__(self, data, general_data, initial_guess):
         self.measured_data = {'inlet_pressure': np.array(data['Inlet_Pressure'].values) * 1e6,
-                              'outlet_pressure': np.array(data['Outlet_Pressure'].values) *1e6,
+                              'outlet_pressure': np.array(data['Outlet_Pressure'].values) * 1e6,
                               'duration': np.array(data['Duration'].values),
                               'temperature': data['Temperature'].mean() + 273.15}
         self.guess = {'permeability': initial_guess[0],
@@ -189,93 +198,92 @@ class DiffusionEquation:
         self.general_data = general_data
         self.calculated_data = {}
 
-
-    def main(self):
-        pressure_in_cells = self.set_initial_cell_pressure()
+    def solve_linear_system(self):
+        cell_pressure = self.set_initial_pressure()
         number_of_timesteps = len(self.measured_data['duration']) - 1
-        for step in range(0, number_of_timesteps):
-            dt = self.get_stepsize(step)
-            pressure_in_cells_old = pressure_in_cells
-            coefficient_matrix, solution_vector = self.get_linear_system(pressure_in_cells, dt)
-        print(coefficient_matrix, solution_vector)
+        inlet_pressure_calculated = [self.measured_data['inlet_pressure'][0]]
+        outlet_pressure_calculated = [self.measured_data['outlet_pressure'][0]]
 
+        for step in range(number_of_timesteps):
+            self.set_stepsize_dt(step)
+            #cell_pressure_old = cell_pressure
+            coefficient_matrix, solution_vector = self.get_linear_system(cell_pressure)
+            cell_pressure_new = scipy.sparse.linalg.spsolve(coefficient_matrix, solution_vector)
+            cell_pressure = cell_pressure_new
+            inlet_pressure_calculated.append(cell_pressure[0])
+            outlet_pressure_calculated.append(cell_pressure[-1])
 
-    def set_initial_cell_pressure(self):
+        my_list = [inlet_pressure_calculated, outlet_pressure_calculated]
+        calc_data = pd.DataFrame(my_list).transpose()
+        calc_data.columns = ['Inlet_Pressure', 'Outlet_Pressure']
+
+        return calc_data
+
+    def set_initial_pressure(self):
         atmospheric_pressure = self.measured_data['outlet_pressure'][0]
-        pressure_in_cells = np.ones(self.number_of_cells) * atmospheric_pressure
-        pressure_in_cells[0] = self.measured_data['inlet_pressure'][0]
-        return pressure_in_cells
+        cell_pressure = np.ones(self.number_of_cells) * atmospheric_pressure
+        cell_pressure[0] = self.measured_data['inlet_pressure'][0]
+        return cell_pressure
 
-    def get_stepsize(self, step):
+    def set_stepsize_dt(self, step):
         timesteps = self.measured_data['duration']
         dt = timesteps[step + 1] - timesteps[step]
+        self.calculated_data.update({'dt': dt})
         return dt
 
-    def get_linear_system(self, pressure, dt):
-        main_diagonal, off_diagonal, solution_vector = self.build_linear_system(pressure, dt)
+    def get_linear_system(self, cell_pressure):
+        main_diagonal, off_diagonal, solution_vector = self.build_diagonals(cell_pressure)
 
         A = scipy.sparse.diags(
             diagonals=[-main_diagonal, off_diagonal, off_diagonal],
             offsets=[0, -1, 1],
             shape=(self.number_of_cells, self.number_of_cells),
             format='csr')
-        #TODO Druck sollte der Druck zum alten Zeitpunkt sein. Spaetestens bei implementierung der iterativen Loesung ist das wichtig
-        b = - solution_vector * pressure
-
+        # TODO cell_pressure_old for inner iteration
+        b = - solution_vector * cell_pressure
         return A, b
 
-    def build_linear_system(self, pressure, dt):
-        compressibilty = self.get_coolprop_data('ISOTHERMAL_COMPRESSIBILITY', pressure)
-        viscosity = self.get_coolprop_data('VISCOSITY', pressure)
-        density = self.get_coolprop_data('DMASS', pressure)
-        cross_sectional_area = np.pi * self.general_data['diameter'] ** 2 / 4
+    def build_diagonals(self, cell_pressure):
+        k, n = self.initialize_permeability_porosity()
+        compressibility, viscosity, density = self.get_coolprop_data(cell_pressure)
         dx = self.general_data['length'] / (self.number_of_cells - 1)
+        dt = self.calculated_data['dt']
 
-        k = self.guess['permeability'] * np.ones(self.number_of_cells)
-        k[0] = k[-1] = 1
-        n = self.guess['porosity'] * np.ones(self.number_of_cells)
-        n[0] = n[-1] = 1
         viscosity_mean = (viscosity[1:] + viscosity[:-1]) / 2
         density_mean = (density[1:] + density[:-1]) / 2
         k_mean_harmonic = ((2 * k[1:] * k[:-1]) / (k[1:] + k[:-1]))
 
-        off_diagonal = (density_mean * cross_sectional_area * k_mean_harmonic) / (viscosity_mean * dx)
-
-        main_diagonal = (cross_sectional_area * n * compressibilty * density * dx) / dt
+        off_diagonal = (density_mean * self.general_data['area'] * k_mean_harmonic) / (viscosity_mean * dx)
+        main_diagonal = (self.general_data['area'] * n * compressibility * density * dx) / dt
         main_diagonal[1:-1] = main_diagonal[1:-1] + off_diagonal[:-1] + off_diagonal[1:]
-        #TODO ueberpruefen, ob der Nenner hier in Klammern stehen muss
-        main_diagonal[0] = (self.general_data['inlet_chamber_volume'] * density[0] * compressibilty[0]) \
-                           / dt + off_diagonal[0]
-        main_diagonal[-1] = (self.general_data['outlet_chamber_volume'] * density[-1] * compressibilty[-1]) \
-                           / dt + off_diagonal[-1]
-
-        solution_vector = (cross_sectional_area * n * compressibilty * density * dx) / dt
-        solution_vector[0] = (self.general_data['inlet_chamber_volume'] * density[0] + compressibilty[0]) / dt
-        solution_vector[-1] = (self.general_data['outlet_chamber_volume'] * density[-1] + compressibilty[-1]) / dt
+        main_diagonal[0] = (self.general_data['inlet_chamber_volume'] * density[0] * compressibility[0]) / \
+                            dt + off_diagonal[0]
+        main_diagonal[-1] = (self.general_data['outlet_chamber_volume'] * density[-1] * compressibility[-1]) / \
+                            dt + off_diagonal[-1]
+        solution_vector = self.general_data['area'] * n * compressibility * density * dx / dt
+        solution_vector[0] = self.general_data['inlet_chamber_volume'] * density[0] * compressibility[0] / dt
+        solution_vector[-1] = self.general_data['outlet_chamber_volume'] * density[-1] * compressibility[-1] / dt
 
         return main_diagonal, off_diagonal, solution_vector
 
-    def get_coolprop_data(self, value, pressure):
+    def initialize_permeability_porosity(self):
+        k = self.guess['permeability'] * np.ones(self.number_of_cells)
+        k[0] = k[-1] = 1
+        n = self.guess['porosity'] * np.ones(self.number_of_cells)
+        n[0] = n[-1] = 1
+        return k, n
+
+    def get_coolprop_data(self, pressure):
         try:
-            return CP.PropsSI(value, 'T', self.measured_data['temperature'],
-                                    'P', pressure, self.general_data['gas'])
+            searched_parameter = ['ISOTHERMAL_COMPRESSIBILITY', 'VISCOSITY', 'DMASS']
+            result = []
+            for i in searched_parameter:
+                result.append(CP.PropsSI(i, 'T', self.measured_data['temperature'],
+                                         'P', pressure, self.general_data['gas']))
         except:
+            # TODO add error handling
             pass
-
-
-class ThermodynamicProperties:
-
-    def __init__(self):
-        pass
-
-    def get_compressibility(self):
-        pass
-
-    def get_viscosity(self):
-        pass
-
-    def get_density(self):
-        pass
+        return result
 
 
 class Main:
@@ -284,12 +292,13 @@ class Main:
         self.path = path
 
     def run_perm_1d(self, initial_guess):
-        df = MeasurementData(self.path).interpolate_data()
+        measured_data = MeasurementData(self.path).interpolate_data()
         general_data = MeasurementData(self.path).get_general_data()
-        temp = DiffusionEquation(df, general_data, initial_guess).main()
+        calculated_data = LinearSystem(measured_data, general_data, initial_guess).solve_linear_system()
+        plot_result = Plotter(measured_data, **{'calc_data': calculated_data})
+        plot_result.plot_calculation_chart()
 
-
-x = Main('HY_S3.txt')
-x.run_perm_1d([1.1, 0.1])
-#x = MeasurementData('HY_S3.txt')
-#x.interpolate_data()
+x = Main('HY_A2_ALU.txt')
+x.run_perm_1d([1e-20, 0.01])
+# x = MeasurementData('HY_S3.txt')
+# x.interpolate_data()
