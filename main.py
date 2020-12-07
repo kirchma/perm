@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 import scipy.sparse
 import scipy.sparse.linalg
 from scipy.interpolate import interp1d
-import CoolProp.CoolProp as CP
+import CoolProp.CoolProp as cp
 
 
 class MeasurementData:
@@ -16,6 +16,23 @@ class MeasurementData:
         self.start = None
         self.stop = None
 
+    def interpolate_data(self):
+        data = self.prepare_data()
+        log_time_scale = self.create_log_time(data)
+
+        function_inlet_pressure = interp1d(data['Duration'], data['Inlet_Pressure'])
+        function_outlet_pressure = interp1d(data['Duration'], data['Outlet_Pressure'])
+        function_temperature = interp1d(data['Duration'], data['Temperature'])
+
+        inlet_pressure_log_scale = function_inlet_pressure(log_time_scale)
+        outlet_pressure_log_scale = function_outlet_pressure(log_time_scale)
+        temperature_log_scale = function_temperature(log_time_scale)
+
+        data_log_scale = pd.DataFrame(np.array([log_time_scale, inlet_pressure_log_scale,
+                                                outlet_pressure_log_scale, temperature_log_scale]).T,
+                                      columns=['Duration', 'Inlet_Pressure', 'Outlet_Pressure', 'Temperature'])
+        return data_log_scale
+
     def prepare_data(self, **kwargs):
         kwargs.setdefault('set_start_time_to_max_pressure', True)
         raw_data = self.read_file(self.path)
@@ -24,17 +41,19 @@ class MeasurementData:
 
         time_adjusted_data = converted_data.iloc[self.start:self.stop]
         if kwargs.get('set_start_time_to_max_pressure'):
-            final_data = self.set_start_time_to_max_pressure(time_adjusted_data)
+            time_adjusted_data = self.set_start_time_to_max_pressure(time_adjusted_data)
         else:
-            final_data = self.reset_duration(time_adjusted_data)
-
+            time_adjusted_data = self.reset_duration(time_adjusted_data)
+        # TODO plot
+        '''
         plot_before_adjustment = Plotter(converted_data,
                                          **{'start': self.start, 'stop': self.stop, 'name': self.filename})
-        # TODO plot
-        # plot_before_adjustment.plot_measurement_chart()
+        
+        plot_before_adjustment.plot_measurement_chart()
         plot_after_adjustment = Plotter(final_data, **{'name': self.filename})
-        # plot_after_adjustment.plot_measurement_chart()
-        return final_data
+        plot_after_adjustment.plot_measurement_chart()
+        '''
+        return time_adjusted_data
 
     @staticmethod
     def read_file(path):
@@ -89,25 +108,6 @@ class MeasurementData:
         df.reset_index(inplace=True, drop=True)
         df['Duration'] = df['Duration'] - df.iloc[0, 0] + 1
         return df
-
-    def interpolate_data(self):
-        data = self.prepare_data()
-        log_time_scale = self.create_log_time(data)
-
-        function_inlet_pressure = interp1d(data['Duration'], data['Inlet_Pressure'])
-        function_outlet_pressure = interp1d(data['Duration'], data['Outlet_Pressure'])
-        function_temperature = interp1d(data['Duration'], data['Temperature'])
-
-        inlet_pressure_log_scale = function_inlet_pressure(log_time_scale)
-        outlet_pressure_log_scale = function_outlet_pressure(log_time_scale)
-        temperature_log_scale = function_temperature(log_time_scale)
-
-        data_log_scale = pd.DataFrame(np.array([log_time_scale, inlet_pressure_log_scale,
-                                                outlet_pressure_log_scale, temperature_log_scale]).T,
-                                      columns=['Duration', 'Inlet_Pressure', 'Outlet_Pressure', 'Temperature'])
-        # TODO kann nach Test entfernt werden
-        # data_log_scale.to_csv('test.csv', index=False, float_format='%.4f', sep='\t')
-        return data_log_scale
 
     @staticmethod
     def create_log_time(data):
@@ -186,7 +186,7 @@ class Plotter:
 
 
 class LinearSystem:
-    number_of_cells = 51
+    number_of_cells = 3
 
     def __init__(self, data, general_data, initial_guess):
         self.measured_data = {'inlet_pressure': np.array(data['Inlet_Pressure'].values) * 1e6,
@@ -198,44 +198,54 @@ class LinearSystem:
         self.general_data = general_data
         self.calculated_data = {}
 
-    def solve_linear_system(self):
-        cell_pressure = self.set_initial_pressure()
+    def solve_linear_system(self) -> pd.DataFrame:
         number_of_timesteps = len(self.measured_data['duration']) - 1
         inlet_pressure_calculated = [self.measured_data['inlet_pressure'][0]]
         outlet_pressure_calculated = [self.measured_data['outlet_pressure'][0]]
 
         for step in range(number_of_timesteps):
             self.set_stepsize_dt(step)
-            #cell_pressure_old = cell_pressure
-            coefficient_matrix, solution_vector = self.get_linear_system(cell_pressure)
-            cell_pressure_new = scipy.sparse.linalg.spsolve(coefficient_matrix, solution_vector)
-            cell_pressure = cell_pressure_new
+            cell_pressure = self.iterate_nonlinear_parameters()
             inlet_pressure_calculated.append(cell_pressure[0])
             outlet_pressure_calculated.append(cell_pressure[-1])
 
-        my_list = [inlet_pressure_calculated, outlet_pressure_calculated]
-        calc_data = pd.DataFrame(my_list).transpose()
-        calc_data.columns = ['Inlet_Pressure', 'Outlet_Pressure']
+        result = [inlet_pressure_calculated, outlet_pressure_calculated]
+        calculated_data = pd.DataFrame(result).transpose()
+        calculated_data.columns = ['Inlet_Pressure', 'Outlet_Pressure']
+        return calculated_data
 
-        return calc_data
-
-    def set_initial_pressure(self):
-        atmospheric_pressure = self.measured_data['outlet_pressure'][0]
-        cell_pressure = np.ones(self.number_of_cells) * atmospheric_pressure
-        cell_pressure[0] = self.measured_data['inlet_pressure'][0]
-        return cell_pressure
-
-    def set_stepsize_dt(self, step):
+    def set_stepsize_dt(self, step: int) -> float:
         timesteps = self.measured_data['duration']
         dt = timesteps[step + 1] - timesteps[step]
         self.calculated_data.update({'dt': dt})
         return dt
 
-    def get_linear_system(self, cell_pressure):
+    def iterate_nonlinear_parameters(self) -> np.ndarray:
+        inner_iteration = 0
+        max_iteration = 10
+        difference = 1
+        cell_pressure = self.get_initial_pressure()
+
+        _, solution_vector = self.get_linear_system(cell_pressure)
+        while difference > 1e-4 and inner_iteration < max_iteration:
+            coefficient_matrix, _ = self.get_linear_system(cell_pressure)
+            cell_pressure_new = scipy.sparse.linalg.spsolve(coefficient_matrix, solution_vector)
+            difference = self.l2_norm(cell_pressure_new, cell_pressure)
+            cell_pressure = cell_pressure_new
+            inner_iteration += 1
+        return cell_pressure
+
+    def get_initial_pressure(self) -> np.ndarray:
+        atmospheric_pressure = self.measured_data['outlet_pressure'][0]
+        cell_pressure = np.ones(self.number_of_cells) * atmospheric_pressure
+        cell_pressure[0] = self.measured_data['inlet_pressure'][0]
+        return cell_pressure
+
+    def get_linear_system(self, cell_pressure: np.ndarray):
         main_diagonal, off_diagonal, solution_vector = self.build_diagonals(cell_pressure)
 
         A = scipy.sparse.diags(
-            diagonals=[-main_diagonal, off_diagonal, off_diagonal],
+            diagonals=[main_diagonal * -1, off_diagonal, off_diagonal],
             offsets=[0, -1, 1],
             shape=(self.number_of_cells, self.number_of_cells),
             format='csr')
@@ -243,7 +253,13 @@ class LinearSystem:
         b = - solution_vector * cell_pressure
         return A, b
 
-    def build_diagonals(self, cell_pressure):
+    @staticmethod
+    def l2_norm(p, p_ref):
+        l2_diff = np.sqrt(np.sum((p - p_ref) ** 2))
+        l2_ref = np.sqrt(np.sum(p_ref ** 2))
+        return l2_diff / l2_ref
+
+    def build_diagonals(self, cell_pressure: np.ndarray):
         k, n = self.initialize_permeability_porosity()
         compressibility, viscosity, density = self.get_coolprop_data(cell_pressure)
         dx = self.general_data['length'] / (self.number_of_cells - 1)
@@ -278,12 +294,18 @@ class LinearSystem:
             searched_parameter = ['ISOTHERMAL_COMPRESSIBILITY', 'VISCOSITY', 'DMASS']
             result = []
             for i in searched_parameter:
-                result.append(CP.PropsSI(i, 'T', self.measured_data['temperature'],
+                result.append(cp.PropsSI(i, 'T', self.measured_data['temperature'],
                                          'P', pressure, self.general_data['gas']))
         except:
             # TODO add error handling
             pass
         return result
+
+
+class Optimizer:
+
+    def __init__(self):
+        pass
 
 
 class Main:
@@ -299,6 +321,19 @@ class Main:
         plot_result.plot_calculation_chart()
 
 x = Main('HY_A2_ALU.txt')
-x.run_perm_1d([1e-20, 0.01])
-# x = MeasurementData('HY_S3.txt')
-# x.interpolate_data()
+x.run_perm_1d([1e-19, 0.01])
+
+'''
+data = pd.DataFrame({
+    'Inlet_Pressure': [10, 9],
+    'Outlet_Pressure': [0.1, 0.1],
+    'Duration': [1, 2],
+    'Temperature': [15.18, 15.18]})
+general_data = {'area': np.pi * 0.25 * 0.1**2, 'length': 0.2, 'gas': 'H2',
+                'inlet_chamber_volume': 150*1e-6, 'outlet_chamber_volume': 160*1e-6}
+initial_guess = [1e-16, 0.01]
+
+x = LinearSystem(data, general_data, initial_guess)
+x.solve_linear_system()
+'''
+
