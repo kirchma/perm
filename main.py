@@ -181,7 +181,14 @@ class Plotter:
         plt.semilogx(self.df['Duration'], self.df['Outlet_Pressure'], color='C0', linestyle='-')
         plt.scatter(self.df['Duration'], self.calc_data['Inlet_Pressure'] * 1e-6, color='r', s=3, label='Rechenwerte')
         plt.scatter(self.df['Duration'], self.calc_data['Outlet_Pressure'] * 1e-6, color='r', s=3)
+
         plt.legend()
+        plt.grid(True)
+        plt.grid(True, which='minor', linestyle='--')
+        ax.set_xlim(left=1)
+
+        ax.set_xlabel('Zeit in s', fontsize=16)
+        ax.set_ylabel('Druck in MPa', fontsize=16)
         plt.show()
 
 
@@ -210,9 +217,9 @@ class LinearSystem:
             outlet_pressure_calculated.append(cell_pressure[-1])
 
         result = [inlet_pressure_calculated, outlet_pressure_calculated]
-        calculated_data = pd.DataFrame(result).transpose()
-        calculated_data.columns = ['Inlet_Pressure', 'Outlet_Pressure']
-        return calculated_data
+        chamber_pressure = pd.DataFrame(result).transpose()
+        chamber_pressure.columns = ['Inlet_Pressure', 'Outlet_Pressure']
+        return chamber_pressure, cell_pressure
 
     def set_stepsize_dt(self, step: int) -> float:
         timesteps = self.measured_data['duration']
@@ -249,7 +256,6 @@ class LinearSystem:
             offsets=[0, -1, 1],
             shape=(self.number_of_cells, self.number_of_cells),
             format='csr')
-        # TODO cell_pressure_old for inner iteration
         b = - solution_vector * cell_pressure
         return A, b
 
@@ -304,8 +310,49 @@ class LinearSystem:
 
 class Optimizer:
 
-    def __init__(self):
-        pass
+    def __init__(self, measured_data, general_data, initial_guess):
+        self.measured_data = measured_data
+        self.general_data = general_data
+        self.initial_guess = initial_guess
+        self.error = []
+        self.k_iterative = []
+
+    def gradient_descent(self):
+
+        for i in range(1, 5):
+            self.set_new_k(i)
+            print(self.k_iterative)
+            chamber_pressure, _ = LinearSystem(self.measured_data,
+                                               self.general_data,
+                                               self.initial_guess).solve_linear_system()
+            self.error.append(self.calculate_error(chamber_pressure))
+
+        return chamber_pressure
+
+    def set_new_k(self, i):
+        if i <= 2:
+            self.initial_guess[0] = self.initial_guess[0] * 1/i
+            self.k_iterative.append(self.initial_guess[0])
+        else:
+            new_k = self.k_iterative[-1] - (self.k_iterative[-1] - self.k_iterative[-2]) / \
+                    (self.error[-1] - self.error[-2]) * self.error[-1]
+            self.initial_guess[0] = new_k
+            self.k_iterative.append(new_k)
+
+    def calculate_error(self, p):
+        p_in_ref = self.measured_data['Inlet_Pressure']
+        p_out_ref = self.measured_data['Outlet_Pressure']
+        p_in = p['Inlet_Pressure']
+        p_out = p['Outlet_Pressure']
+
+        # TODO: Fehlerberechung
+        # l2_diff = np.sqrt(np.sum((p_in - p_in_ref)**2 + (p_out - p_out_ref)**2))
+        l2_diff = np.sqrt(np.sum((p_in - p_in_ref)**2))
+        # l2_ref = np.sqrt(np.sum(p_in_ref**2 + p_out_ref**2))
+        l2_ref = np.sqrt(np.sum(p_in_ref**2))
+        error = l2_diff / l2_ref
+        print(error)
+        return error
 
 
 class Main:
@@ -316,12 +363,22 @@ class Main:
     def run_perm_1d(self, initial_guess):
         measured_data = MeasurementData(self.path).interpolate_data()
         general_data = MeasurementData(self.path).get_general_data()
-        calculated_data = LinearSystem(measured_data, general_data, initial_guess).solve_linear_system()
-        plot_result = Plotter(measured_data, **{'calc_data': calculated_data})
+        chamber_pressure, _ = LinearSystem(measured_data, general_data, initial_guess).solve_linear_system()
+        plot_result = Plotter(measured_data, **{'calc_data': chamber_pressure})
         plot_result.plot_calculation_chart()
 
+    def optimize_perm_1d(self, initial_guess):
+        measured_data = MeasurementData(self.path).interpolate_data()
+        general_data = MeasurementData(self.path).get_general_data()
+        chamber_pressure = Optimizer(measured_data, general_data, initial_guess).gradient_descent()
+        plot_result = Plotter(measured_data, **{'calc_data': chamber_pressure})
+        plot_result.plot_calculation_chart()
+
+    def optimize(self):
+        pass
+
 x = Main('HY_A2_ALU.txt')
-x.run_perm_1d([1e-19, 0.01])
+x.optimize_perm_1d([1e-19, 0.01])
 
 '''
 data = pd.DataFrame({
@@ -336,4 +393,3 @@ initial_guess = [1e-16, 0.01]
 x = LinearSystem(data, general_data, initial_guess)
 x.solve_linear_system()
 '''
-
