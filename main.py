@@ -4,6 +4,7 @@ import os
 from matplotlib import pyplot as plt
 import scipy.sparse
 import scipy.sparse.linalg
+import scipy.optimize as optimize
 from scipy.interpolate import interp1d
 import CoolProp.CoolProp as cp
 
@@ -317,11 +318,47 @@ class Optimizer:
         self.error = []
         self.k_iterative = []
 
+    def nelder_mead(self,):
+        min_result = optimize.minimize(self.iteration, self.initial_guess[0], method='Nelder-Mead',
+                                       options={'disp': True}, tol=0.001)
+        print(min_result)
+        self.initial_guess[0] = min_result.x
+        chamber_pressure, _ = LinearSystem(self.measured_data,
+                                           self.general_data,
+                                           self.initial_guess).solve_linear_system()
+        print(self.initial_guess)
+        return chamber_pressure
+
+    def iteration(self, guess):
+        guess = [guess[0], self.initial_guess[1]]
+        chamber_pressure, _ = LinearSystem(self.measured_data,
+                                           self.general_data,
+                                           guess).solve_linear_system()
+        self.error.append(self.calculate_error(chamber_pressure))
+        print(f"k = {guess[0]:.4} m^2 , n = {guess[1] * 100:.2} %, e = {self.error[-1]*1e-5:.4} bar")
+        return self.error[-1]
+
+    def calculate_error(self, p):
+        p_in_ref = self.measured_data['Inlet_Pressure'] * 1e6
+        p_out_ref = self.measured_data['Outlet_Pressure'] * 1e6
+        p_in = p['Inlet_Pressure']
+        p_out = p['Outlet_Pressure']
+
+        # TODO: Fehlerberechung
+        # absolute_error = np.sqrt(np.sum((p_in - p_in_ref)**2 + (p_out - p_out_ref)**2))
+        # absolute_magnitude = np.sqrt(np.sum(p_in_ref**2 + p_out_ref**2))
+        # relative_error = absolute_error / absolute_magnitude * 100
+        absolute_magnitude = np.sqrt(sum(p_in_ref**2 + p_out_ref**2))
+        difference_measured_calculated = abs(p_in_ref - p_in) + abs(p_out_ref - p_out)
+        absolute_error = np.sqrt(sum(difference_measured_calculated**2))
+        relative_error = absolute_error / absolute_magnitude * 100
+        return absolute_error
+
+    '''
     def gradient_descent(self):
 
-        for i in range(1, 5):
+        for i in range(1, 4):
             self.set_new_k(i)
-            print(self.k_iterative)
             chamber_pressure, _ = LinearSystem(self.measured_data,
                                                self.general_data,
                                                self.initial_guess).solve_linear_system()
@@ -336,23 +373,9 @@ class Optimizer:
         else:
             new_k = self.k_iterative[-1] - (self.k_iterative[-1] - self.k_iterative[-2]) / \
                     (self.error[-1] - self.error[-2]) * self.error[-1]
-            self.initial_guess[0] = new_k
-            self.k_iterative.append(new_k)
-
-    def calculate_error(self, p):
-        p_in_ref = self.measured_data['Inlet_Pressure']
-        p_out_ref = self.measured_data['Outlet_Pressure']
-        p_in = p['Inlet_Pressure']
-        p_out = p['Outlet_Pressure']
-
-        # TODO: Fehlerberechung
-        # l2_diff = np.sqrt(np.sum((p_in - p_in_ref)**2 + (p_out - p_out_ref)**2))
-        l2_diff = np.sqrt(np.sum((p_in - p_in_ref)**2))
-        # l2_ref = np.sqrt(np.sum(p_in_ref**2 + p_out_ref**2))
-        l2_ref = np.sqrt(np.sum(p_in_ref**2))
-        error = l2_diff / l2_ref
-        print(error)
-        return error
+            self.initial_guess[0] = abs(new_k)
+            self.k_iterative.append(abs(new_k))
+    '''
 
 
 class Main:
@@ -370,26 +393,26 @@ class Main:
     def optimize_perm_1d(self, initial_guess):
         measured_data = MeasurementData(self.path).interpolate_data()
         general_data = MeasurementData(self.path).get_general_data()
-        chamber_pressure = Optimizer(measured_data, general_data, initial_guess).gradient_descent()
+        chamber_pressure = Optimizer(measured_data, general_data, initial_guess).nelder_mead()
         plot_result = Plotter(measured_data, **{'calc_data': chamber_pressure})
         plot_result.plot_calculation_chart()
 
     def optimize(self):
         pass
 
-x = Main('HY_A2_ALU.txt')
-x.optimize_perm_1d([1e-19, 0.01])
+x = Main('HY_S3.txt')
+x.optimize_perm_1d([1e-20, 0.001])
 
 '''
 data = pd.DataFrame({
-    'Inlet_Pressure': [10, 9],
-    'Outlet_Pressure': [0.1, 0.1],
-    'Duration': [1, 2],
-    'Temperature': [15.18, 15.18]})
+    'Inlet_Pressure': [10, 9.9, 9.8],
+    'Outlet_Pressure': [0.1, 0.2, 0.3],
+    'Duration': [1, 1000, 10000],
+    'Temperature': [15.18, 15.18, 15.18]})
 general_data = {'area': np.pi * 0.25 * 0.1**2, 'length': 0.2, 'gas': 'H2',
                 'inlet_chamber_volume': 150*1e-6, 'outlet_chamber_volume': 160*1e-6}
 initial_guess = [1e-16, 0.01]
 
-x = LinearSystem(data, general_data, initial_guess)
-x.solve_linear_system()
+x = Optimizer(data, general_data, initial_guess)
+x.gradient_descent()
 '''
