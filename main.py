@@ -194,7 +194,7 @@ class Plotter:
 
 
 class LinearSystem:
-    number_of_cells = 3
+    number_of_cells = 51
 
     def __init__(self, data, general_data, initial_guess):
         self.measured_data = {'inlet_pressure': np.array(data['Inlet_Pressure'].values) * 1e6,
@@ -210,10 +210,11 @@ class LinearSystem:
         number_of_timesteps = len(self.measured_data['duration']) - 1
         inlet_pressure_calculated = [self.measured_data['inlet_pressure'][0]]
         outlet_pressure_calculated = [self.measured_data['outlet_pressure'][0]]
+        cell_pressure = self.get_initial_pressure()
 
         for step in range(number_of_timesteps):
             self.set_stepsize_dt(step)
-            cell_pressure = self.iterate_nonlinear_parameters()
+            cell_pressure = self.iterate_nonlinear_parameters(cell_pressure)
             inlet_pressure_calculated.append(cell_pressure[0])
             outlet_pressure_calculated.append(cell_pressure[-1])
 
@@ -228,14 +229,13 @@ class LinearSystem:
         self.calculated_data.update({'dt': dt})
         return dt
 
-    def iterate_nonlinear_parameters(self) -> np.ndarray:
+    def iterate_nonlinear_parameters(self, cell_pressure) -> np.ndarray:
         inner_iteration = 0
         max_iteration = 10
         difference = 1
-        cell_pressure = self.get_initial_pressure()
 
         _, solution_vector = self.get_linear_system(cell_pressure)
-        while difference > 1e-4 and inner_iteration < max_iteration:
+        while difference > 1e-4 and inner_iteration <= max_iteration:
             coefficient_matrix, _ = self.get_linear_system(cell_pressure)
             cell_pressure_new = scipy.sparse.linalg.spsolve(coefficient_matrix, solution_vector)
             difference = self.l2_norm(cell_pressure_new, cell_pressure)
@@ -322,11 +322,11 @@ class Optimizer:
         min_result = optimize.minimize(self.iteration, self.initial_guess[0], method='Nelder-Mead',
                                        options={'disp': True}, tol=0.001)
         print(min_result)
+        # recalculate with best fit parameters
         self.initial_guess[0] = min_result.x
         chamber_pressure, _ = LinearSystem(self.measured_data,
                                            self.general_data,
                                            self.initial_guess).solve_linear_system()
-        print(self.initial_guess)
         return chamber_pressure
 
     def iteration(self, guess):
@@ -335,7 +335,7 @@ class Optimizer:
                                            self.general_data,
                                            guess).solve_linear_system()
         self.error.append(self.calculate_error(chamber_pressure))
-        print(f"k = {guess[0]:.4} m^2 , n = {guess[1] * 100:.2} %, e = {self.error[-1]*1e-5:.4} bar")
+        print(f"k = {guess[0]:.4} m^2 , n = {guess[1] * 100:.2} %, e = {self.error[-1]:.3} %")
         return self.error[-1]
 
     def calculate_error(self, p):
@@ -352,7 +352,7 @@ class Optimizer:
         difference_measured_calculated = abs(p_in_ref - p_in) + abs(p_out_ref - p_out)
         absolute_error = np.sqrt(sum(difference_measured_calculated**2))
         relative_error = absolute_error / absolute_magnitude * 100
-        return absolute_error
+        return relative_error
 
     '''
     def gradient_descent(self):
@@ -400,7 +400,7 @@ class Main:
     def optimize(self):
         pass
 
-x = Main('HY_S3.txt')
+x = Main('HY_A2_ALU.txt')
 x.optimize_perm_1d([1e-20, 0.001])
 
 '''
