@@ -151,6 +151,46 @@ class MeasurementData:
         return chamber_volume.values[0] * ml_to_m3
 
 
+class MeasurementDataReaktor(MeasurementData):
+
+    @staticmethod
+    def convert_data(df):
+        df['temp'] = pd.to_datetime(df['Date'] + df['Time'], format='%d.%m.%Y%X')
+        df['Duration'] = pd.to_timedelta(df['temp'] - df['temp'][0]).dt.total_seconds()
+        df.drop(['Date', 'Time', 'temp'], axis=1, inplace=True)
+        df = df[['Duration', 'Inlet_Pressure', 'Outlet_Pressure',
+                 'Confining_Pressure_Reactor', 'Confining_Pressure_Sample', 'Temperature']]
+        # convert bar (relative) to Megapascal (absolute)
+        df[['Inlet_Pressure', 'Outlet_Pressure', 'Confining_Pressure_Reactor', 'Confining_Pressure_Sample']] = \
+            df[['Inlet_Pressure', 'Outlet_Pressure', 'Confining_Pressure_Reactor', 'Confining_Pressure_Sample']]\
+                .apply(lambda x: x / 10 + 0.0977)
+        return df
+
+    def get_core_dimensions(self):
+        database = self.read_file('database_reaktor.csv')
+        database.set_index('name', inplace=True)
+        length = database.loc[self.filename, 'length']
+        outer_diameter = database.loc[self.filename, 'outer_diameter']
+        inner_diameter = database.loc[self.filename, 'inner_diameter']
+        area = np.pi * 0.25 * (outer_diameter**2 - inner_diameter**2)
+        gas = database.loc[self.filename, 'gas']
+        my_dict = {'length': length,
+                   'area': area,
+                   'gas': gas}
+        return my_dict
+
+    def get_chamber_volume(self):
+        database = self.read_file('database_reaktor.csv')
+        all_units = self.read_file('measurement_units.csv')
+        ml_to_m3 = 1e-6
+
+        database.set_index('name', inplace=True)
+        used_unit = database.loc[self.filename, 'unit']
+        filt = all_units['number'] == used_unit
+        chamber_volume = all_units.loc[filt, ['inlet_chamber_in_ml', 'outlet_chamber_in_ml']]
+        return chamber_volume.values[0] * ml_to_m3
+
+
 class Plotter:
 
     def __init__(self, df, **kwargs):
