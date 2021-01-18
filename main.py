@@ -13,13 +13,16 @@ class MeasurementData:
 
     def __init__(self, path):
         self.path = path
-        self.filename, _ = os.path.splitext(path)
+        self.filename, _ = os.path.splitext(os.path.split(path)[1])
         self.start = None
         self.stop = None
 
-    def interpolate_data(self):
+    def interpolate_data(self, **kwargs):
         data = self.prepare_data()
-        log_time_scale = self.create_log_time(data)
+        if kwargs.get('step'):
+            log_time_scale, time_max = self.create_log_time_intervall(data, kwargs['step'])
+        else:
+            log_time_scale = self.create_log_time(data)
 
         function_inlet_pressure = interp1d(data['Duration'], data['Inlet_Pressure'])
         function_outlet_pressure = interp1d(data['Duration'], data['Outlet_Pressure'])
@@ -45,15 +48,11 @@ class MeasurementData:
             time_adjusted_data = self.set_start_time_to_max_pressure(time_adjusted_data)
         else:
             time_adjusted_data = self.reset_duration(time_adjusted_data)
-        # TODO plot
-        '''
         plot_before_adjustment = Plotter(converted_data,
                                          **{'start': self.start, 'stop': self.stop, 'name': self.filename})
-        
-        plot_before_adjustment.plot_measurement_chart()
-        plot_after_adjustment = Plotter(final_data, **{'name': self.filename})
-        plot_after_adjustment.plot_measurement_chart()
-        '''
+        #plot_before_adjustment.plot_measurement_chart()
+        plot_after_adjustment = Plotter(time_adjusted_data, **{'name': self.filename})
+        #plot_after_adjustment.plot_measurement_chart()
         return time_adjusted_data
 
     @staticmethod
@@ -115,9 +114,21 @@ class MeasurementData:
         time_min = 1
         time_max = int(data['Duration'].max())
         amount_of_data_points = 100
-
         log_time_scale = np.geomspace(time_min, time_max, amount_of_data_points).round(2)
         return log_time_scale
+
+    @staticmethod
+    def create_log_time_intervall(data, step):
+        max_step = 5
+        time_min = 1
+
+        if step < max_step:
+            time_max = int(data['Duration'].max()) / 5 * step
+        else:
+            time_max = int(data['Duration'].max())
+        amount_of_data_points = 100
+        log_time_scale = np.geomspace(time_min, time_max, amount_of_data_points).round(2)
+        return log_time_scale, time_max
 
     def get_general_data(self):
         my_dict = self.get_core_dimensions()
@@ -222,12 +233,21 @@ class Plotter:
         plt.semilogx(self.df['Duration'], self.df['Outlet_Pressure'], color='C0', linestyle='-')
         plt.scatter(self.df['Duration'], self.calc_data['Inlet_Pressure'] * 1e-6, color='r', s=3, label='Rechenwerte')
         plt.scatter(self.df['Duration'], self.calc_data['Outlet_Pressure'] * 1e-6, color='r', s=3)
+        # plot stepwise solution
+        try:
+            ax2 = ax.twinx()
+            ax2.plot(self.intervals[1], self.intervals[0], color='k', marker="o", ls="")
+            k_intervals_sorted = sorted(self.intervals[0])
+            ax2.set_ylim(10 ** np.ceil(np.log10(k_intervals_sorted[-1])), 10 ** (np.ceil(np.log10(k_intervals_sorted[0])) - 1))
+            ax2.set_yscale('log')
+            ax2.set_ylabel('Permeabilität [m²]', fontsize=16)
+        except:
+            pass
 
-        plt.legend()
-        plt.grid(True)
-        plt.grid(True, which='minor', linestyle='--')
+        ax.legend()
+        ax.grid(True)
+        ax.grid(True, which='minor', linestyle='--')
         ax.set_xlim(left=1)
-
         ax.set_xlabel('Zeit in s', fontsize=16)
         ax.set_ylabel('Druck in MPa', fontsize=16)
         plt.show()
@@ -246,7 +266,7 @@ class LinearSystem:
         self.general_data = general_data
         self.calculated_data = {}
 
-    def solve_linear_system(self) -> pd.DataFrame:
+    def solve_linear_system(self):
         number_of_timesteps = len(self.measured_data['duration']) - 1
         inlet_pressure_calculated = [self.measured_data['inlet_pressure'][0]]
         outlet_pressure_calculated = [self.measured_data['outlet_pressure'][0]]
@@ -320,7 +340,7 @@ class LinearSystem:
         main_diagonal = (self.general_data['area'] * n * compressibility * density * dx) / dt
         main_diagonal[1:-1] = main_diagonal[1:-1] + off_diagonal[:-1] + off_diagonal[1:]
         main_diagonal[0] = (self.general_data['inlet_chamber_volume'] * density[0] * compressibility[0]) / \
-                            dt + off_diagonal[0]
+                           dt + off_diagonal[0]
         main_diagonal[-1] = (self.general_data['outlet_chamber_volume'] * density[-1] * compressibility[-1]) / \
                             dt + off_diagonal[-1]
         solution_vector = self.general_data['area'] * n * compressibility * density * dx / dt
@@ -358,7 +378,7 @@ class Optimizer:
         self.error = []
         self.k_iterative = []
 
-    def nelder_mead(self,):
+    def nelder_mead(self):
         min_result = optimize.minimize(self.iteration, self.initial_guess[0], method='Nelder-Mead',
                                        options={'disp': True}, tol=0.001)
         print(min_result)
@@ -367,7 +387,7 @@ class Optimizer:
         chamber_pressure, _ = LinearSystem(self.measured_data,
                                            self.general_data,
                                            self.initial_guess).solve_linear_system()
-        return chamber_pressure
+        return chamber_pressure, min_result.x[0]
 
     def iteration(self, guess):
         guess = [guess[0], self.initial_guess[1]]
@@ -433,15 +453,34 @@ class Main:
     def optimize_perm_1d(self, initial_guess):
         measured_data = MeasurementData(self.path).interpolate_data()
         general_data = MeasurementData(self.path).get_general_data()
+        chamber_pressure, _ = Optimizer(measured_data, general_data, initial_guess).nelder_mead()
+        plot_result = Plotter(measured_data, **{'calc_data': chamber_pressure})
+        plot_result.plot_calculation_chart()
+
+    def optimize_reaktor(self, initial_guess):
+        measured_data = MeasurementDataReaktor(self.path).interpolate_data()
+        general_data = MeasurementDataReaktor(self.path).get_general_data()
         chamber_pressure = Optimizer(measured_data, general_data, initial_guess).nelder_mead()
         plot_result = Plotter(measured_data, **{'calc_data': chamber_pressure})
         plot_result.plot_calculation_chart()
 
-    def optimize(self):
-        pass
+    def optimize_measurement_intervals(self, initial_guess):
+        time_interval = []
+        k_interval = []
+        general_data = MeasurementData(self.path).get_general_data()
+        for step in range(1,6):
+            measured_data = MeasurementData(self.path).interpolate_data(step=step)
+            chamber_pressure, k = Optimizer(measured_data, general_data, initial_guess).nelder_mead()
+            k_interval.append(k)
+            time_interval.append(measured_data['Duration'].max())
+        plot_result = Plotter(measured_data, **{'calc_data': chamber_pressure, 'intervals': [k_interval, time_interval]})
+        plot_result.plot_calculation_chart()
 
-x = Main('HY_A2_ALU.txt')
-x.optimize_perm_1d([1e-20, 0.001])
+#x = MeasurementData('C:\\Users\\Martin\\OneDrive\\Promotion\\PERM\\raw_data\\HY_SA2_3.txt')
+#x.interpolate_data()
+
+x = Main('C:\\Users\\Martin\\OneDrive\\Promotion\\PERM\\raw_data\\HY_V9.txt')
+x.optimize_measurement_intervals([1e-22, 0.001])
 
 '''
 data = pd.DataFrame({
