@@ -4,25 +4,15 @@ import pandas as pd
 import numpy as np
 
 
-class TestMain(unittest.TestCase):
+class TestLinearSystem(unittest.TestCase):
 
     def setUp(self):
-        data = pd.DataFrame({'Inlet_Pressure': [10, 9, 8, 7, 6],
-                             'Outlet_Pressure': [0.1, 1, 2, 3, 4],
-                             'Duration': [1, 10, 100, 1000, 10000],
-                             'Temperature': [15.1, 15.2, 15.3, 15.2, 15.1]})
-        self.general_data = {'area': np.pi * 0.25 * 0.1**2, 'length': 0.2, 'gas': 'H2',
-                             'inlet_chamber_volume': 150*1e-6, 'outlet_chamber_volume': 160*1e-6}
+        self.data = pd.read_csv('test_data_01.csv')
+        general_data = {'area': np.pi * 0.25 * 0.1**2, 'length': 0.2, 'gas': 'H2',
+                        'inlet_chamber_volume': 150*1e-6, 'outlet_chamber_volume': 160*1e-6}
         self.initial_guess = [1e-16, 0.01]
-        self.eq = LinearSystem(data, self.general_data, self.initial_guess)
+        self.eq = LinearSystem(self.data, general_data, self.initial_guess)
         self.eq.number_of_cells = 3
-
-        data1 = pd.DataFrame({'Inlet_Pressure': [10, 9],
-                            'Outlet_Pressure': [0.1, 0.1],
-                            'Duration': [1, 2],
-                            'Temperature': [15.18, 15.18]})
-        self.eq1 = LinearSystem(data1, self.general_data, self.initial_guess)
-        self.eq1.number_of_cells = 3
 
     def tearDown(self):
         pass
@@ -31,8 +21,8 @@ class TestMain(unittest.TestCase):
         np.testing.assert_array_equal(self.eq.get_initial_pressure(), [1e7, 1e5, 1e5])
 
     def test_set_stepsize(self):
-        dt = [9, 90, 900, 9000]
-        for step in range(4):
+        dt = self.data['Duration'].diff()[1:].to_list()
+        for step in range(len(dt)):
             self.assertEqual(self.eq.set_stepsize_dt(step), dt[step])
 
     def test_initialize_permeability_porosity(self):
@@ -48,7 +38,6 @@ class TestMain(unittest.TestCase):
         dx = 0.1
 
         off_diagonal = [7.176345904e-13 / dx, 1.517955181e-14 / dx]
-
         main_diagonal = [1.11737513e-10 / dt + off_diagonal[0],
                          6.59645475e-11 * dx / dt + off_diagonal[0] + off_diagonal[1],
                          1.34381873e-10 / dt + off_diagonal[1]]
@@ -60,11 +49,11 @@ class TestMain(unittest.TestCase):
         np.testing.assert_allclose(vector, solution_vector)
 
 
-    def test_iterate_nonlinear_parameters(self):
-        self.eq1.calculated_data.update({'dt': 1})
+    #def test_iterate_nonlinear_parameters(self):
+        #self.eq1.calculated_data.update({'dt': 1})
         # TODO: Druck fuer alle Iterationen berechnen und die letzte stufe angeben
-        pressure = np.array([9701160.5, 5048228.1, 105583.12])
-        np.testing.assert_allclose(self.eq1.iterate_nonlinear_parameters(), pressure, rtol=1e-6)
+        #pressure = np.array([9701160.5, 5048228.1, 105583.12])
+        #np.testing.assert_allclose(self.eq1.iterate_nonlinear_parameters(), pressure, rtol=1e-6)
 
 
 

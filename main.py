@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-import os
+import os, time
 from matplotlib import pyplot as plt
 import scipy.sparse
 import scipy.sparse.linalg
@@ -20,7 +20,11 @@ class MeasurementData:
     def interpolate_data(self, **kwargs):
         data = self.prepare_data()
         if kwargs.get('step'):
-            log_time_scale, time_max = self.create_log_time_intervall(data, kwargs['step'])
+            log_time_scale = self.create_log_time_intervall(data, kwargs['step'])
+        elif kwargs.get('manual'):
+            coordinates = self.get_manual_coordinates(data)
+            log_time_scale = self.create_log_time_manual(data, coordinates)
+            #TODO: log_time_scale gibt eine verschachtelte Liste zurück, in separate Funktion packen
         else:
             log_time_scale = self.create_log_time(data)
 
@@ -32,10 +36,49 @@ class MeasurementData:
         outlet_pressure_log_scale = function_outlet_pressure(log_time_scale)
         temperature_log_scale = function_temperature(log_time_scale)
 
-        data_log_scale = pd.DataFrame(np.array([log_time_scale, inlet_pressure_log_scale,
-                                                outlet_pressure_log_scale, temperature_log_scale]).T,
-                                      columns=['Duration', 'Inlet_Pressure', 'Outlet_Pressure', 'Temperature'])
+
+        if kwargs.get('manual'):
+            data_log_scale = []
+            for i in range(len(log_time_scale)):
+                temp = pd.DataFrame(np.array([log_time_scale[i], inlet_pressure_log_scale[i],
+                                                        outlet_pressure_log_scale[i], temperature_log_scale[i]]).T,
+                                              columns=['Duration', 'Inlet_Pressure', 'Outlet_Pressure', 'Temperature'])
+                data_log_scale.append(temp)
+        else:
+            data_log_scale = pd.DataFrame(np.array([log_time_scale, inlet_pressure_log_scale,
+                                                    outlet_pressure_log_scale, temperature_log_scale]).T,
+                                          columns=['Duration', 'Inlet_Pressure', 'Outlet_Pressure', 'Temperature'])
         return data_log_scale
+
+    def get_manual_coordinates(self, data):
+        coordinates = []
+        while True:
+            user_input = input('Messintervalle ok?')
+            if user_input == 'y':
+                break
+            def onclick(event, ax):
+                ax.time_onclick = time.time()
+            def onrelease(event, ax):
+                if (time.time() - ax.time_onclick) < 0.1:
+                    coordinates.append(event.xdata)
+                    print(event.xdata, event.ydata)
+                    plt.plot(event.xdata, event.ydata, 'r+')
+                    fig.canvas.draw()
+
+            fig = plt.figure(figsize=(12, 9))
+            ax = fig.add_subplot(111)
+            ax.semilogx(data['Duration'], data['Inlet_Pressure'])
+            fig.canvas.mpl_connect('button_press_event', lambda event: onclick(event, ax))
+            fig.canvas.mpl_connect('button_release_event', lambda event: onrelease(event, ax))
+            ax.set_title('Messintervalle', fontsize=16)
+            ax.set_xlabel('Messwerte', fontsize=16)
+            ax.set_ylabel('Eingangsdruck in MPa', fontsize=16)
+            ax.grid()
+            plt.show()
+        # get nearest row index for each x-coordinate from user input
+        coordinates = [data['Duration'].sub(i).abs().idxmin() for i in coordinates]
+        coordinates.append(data.index[-1])
+        return coordinates
 
     def prepare_data(self, **kwargs):
         kwargs.setdefault('set_start_time_to_max_pressure', True)
@@ -99,6 +142,7 @@ class MeasurementData:
 
         df = df.loc[index_max_pressure:]
         print(f'Start der Messung {(time_max_pressure_in_sec - valve_opening_in_sec):.0f} sec. nach Ventiloeffnung')
+        print(f'Messdauer = {df["Duration"].max()/86400:.2f} Tage')
         df = self.reset_duration(df)
         return df
 
@@ -123,12 +167,21 @@ class MeasurementData:
         time_min = 1
 
         if step < max_step:
-            time_max = int(data['Duration'].max()) / 5 * step
+            time_max = int(data['Duration'].max()) / max_step * step
         else:
             time_max = int(data['Duration'].max())
         amount_of_data_points = 100
         log_time_scale = np.geomspace(time_min, time_max, amount_of_data_points).round(2)
-        return log_time_scale, time_max
+        return log_time_scale
+
+    def create_log_time_manual(self, data, coordinates):
+        time_min = 1
+        #TODO: passende Namen für die nested lists, da diese nicht identisch mit den Datentypen der oberen Funktionen sind
+        time_max = data.iloc[coordinates, 0].to_list()
+        amount_of_data_points = 100
+        temp = np.geomspace(time_min, time_max, amount_of_data_points).round(2)
+        log_time_scale = list(map(list, zip(*temp)))
+        return log_time_scale
 
     def get_general_data(self):
         my_dict = self.get_core_dimensions()
@@ -235,6 +288,7 @@ class Plotter:
         plt.scatter(self.df['Duration'], self.calc_data['Outlet_Pressure'] * 1e-6, color='r', s=3)
         # plot stepwise solution
         try:
+            self.intervals[1]
             ax2 = ax.twinx()
             ax2.plot(self.intervals[1], self.intervals[0], color='k', marker="o", ls="")
             k_intervals_sorted = sorted(self.intervals[0])
@@ -250,6 +304,7 @@ class Plotter:
         ax.set_xlim(left=1)
         ax.set_xlabel('Zeit in s', fontsize=16)
         ax.set_ylabel('Druck in MPa', fontsize=16)
+        ax.set_title(self.name, fontsize=16)
         plt.show()
 
 
@@ -404,83 +459,87 @@ class Optimizer:
         p_in = p['Inlet_Pressure']
         p_out = p['Outlet_Pressure']
 
-        # TODO: Fehlerberechung
-        # absolute_error = np.sqrt(np.sum((p_in - p_in_ref)**2 + (p_out - p_out_ref)**2))
-        # absolute_magnitude = np.sqrt(np.sum(p_in_ref**2 + p_out_ref**2))
-        # relative_error = absolute_error / absolute_magnitude * 100
         absolute_magnitude = np.sqrt(sum(p_in_ref**2 + p_out_ref**2))
         difference_measured_calculated = abs(p_in_ref - p_in) + abs(p_out_ref - p_out)
         absolute_error = np.sqrt(sum(difference_measured_calculated**2))
         relative_error = absolute_error / absolute_magnitude * 100
         return relative_error
 
-    '''
-    def gradient_descent(self):
-
-        for i in range(1, 4):
-            self.set_new_k(i)
-            chamber_pressure, _ = LinearSystem(self.measured_data,
-                                               self.general_data,
-                                               self.initial_guess).solve_linear_system()
-            self.error.append(self.calculate_error(chamber_pressure))
-
-        return chamber_pressure
-
-    def set_new_k(self, i):
-        if i <= 2:
-            self.initial_guess[0] = self.initial_guess[0] * 1/i
-            self.k_iterative.append(self.initial_guess[0])
-        else:
-            new_k = self.k_iterative[-1] - (self.k_iterative[-1] - self.k_iterative[-2]) / \
-                    (self.error[-1] - self.error[-2]) * self.error[-1]
-            self.initial_guess[0] = abs(new_k)
-            self.k_iterative.append(abs(new_k))
-    '''
-
 
 class Main:
 
     def __init__(self, path):
         self.path = path
+        self.measured_data = None
+        self.general_data = None
+        self.chamber_pressure = None
 
-    def run_perm_1d(self, initial_guess):
-        measured_data = MeasurementData(self.path).interpolate_data()
-        general_data = MeasurementData(self.path).get_general_data()
-        chamber_pressure, _ = LinearSystem(measured_data, general_data, initial_guess).solve_linear_system()
-        plot_result = Plotter(measured_data, **{'calc_data': chamber_pressure})
-        plot_result.plot_calculation_chart()
+    def single_run(self, initial_guess):
+        self.set_data('2KA')
+        self.chamber_pressure, _ = LinearSystem(self.measured_data, self.general_data,
+                                                initial_guess).solve_linear_system()
+        self.plot_result()
 
     def optimize_perm_1d(self, initial_guess):
-        measured_data = MeasurementData(self.path).interpolate_data()
-        general_data = MeasurementData(self.path).get_general_data()
-        chamber_pressure, _ = Optimizer(measured_data, general_data, initial_guess).nelder_mead()
-        plot_result = Plotter(measured_data, **{'calc_data': chamber_pressure})
-        plot_result.plot_calculation_chart()
+        self.set_data('2KA')
+        self.chamber_pressure, _ = Optimizer(self.measured_data, self.general_data,
+                                             initial_guess).nelder_mead()
+        self.plot_result()
 
     def optimize_reaktor(self, initial_guess):
-        measured_data = MeasurementDataReaktor(self.path).interpolate_data()
-        general_data = MeasurementDataReaktor(self.path).get_general_data()
-        chamber_pressure = Optimizer(measured_data, general_data, initial_guess).nelder_mead()
-        plot_result = Plotter(measured_data, **{'calc_data': chamber_pressure})
-        plot_result.plot_calculation_chart()
+        self.set_data('Reaktor')
+        self.chamber_pressure, _ = Optimizer(self.measured_data, self.general_data,
+                                             initial_guess).nelder_mead()
+        self.plot_result()
 
     def optimize_measurement_intervals(self, initial_guess):
         time_interval = []
         k_interval = []
-        general_data = MeasurementData(self.path).get_general_data()
+        self.general_data = MeasurementData(self.path).get_general_data()
         for step in range(1,6):
-            measured_data = MeasurementData(self.path).interpolate_data(step=step)
-            chamber_pressure, k = Optimizer(measured_data, general_data, initial_guess).nelder_mead()
+            self.measured_data = MeasurementData(self.path).interpolate_data(step=step)
+            self.chamber_pressure, k = Optimizer(self.measured_data, self.general_data, initial_guess).nelder_mead()
             k_interval.append(k)
-            time_interval.append(measured_data['Duration'].max())
-        plot_result = Plotter(measured_data, **{'calc_data': chamber_pressure, 'intervals': [k_interval, time_interval]})
+            time_interval.append(self.measured_data['Duration'].max())
+        #TODO: Variable name
+        plot_result = Plotter(self.measured_data, **{'calc_data': self.chamber_pressure,
+                                                     'intervals': [k_interval, time_interval],
+                                                     'name': 'Messung'})
+        plot_result.plot_calculation_chart()
+
+
+    def optimize_measurement_manual(self, initial_guess):
+        self.general_data = MeasurementData(self.path).get_general_data()
+        self.measured_data = MeasurementData(self.path).interpolate_data(manual=True)
+        for i in range(len(self.measured_data)):
+            self.chamber_pressure, _ = Optimizer(self.measured_data[i], self.general_data,
+                                             initial_guess).nelder_mead()
+
+    def set_data(self, measurement_typ='2KA'):
+        if measurement_typ == '2KA':
+            self.measured_data = MeasurementData(self.path).interpolate_data()
+            self.general_data = MeasurementData(self.path).get_general_data()
+        elif measurement_typ == 'Reaktor':
+            self.measured_data = MeasurementDataReaktor(self.path).interpolate_data()
+            self.general_data = MeasurementDataReaktor(self.path).get_general_data()
+
+    def plot_result(self):
+        filename, _ = os.path.splitext(os.path.split(self.path)[1])
+
+        plot_result = Plotter(self.measured_data, **{'calc_data': self.chamber_pressure, 'name': filename})
         plot_result.plot_calculation_chart()
 
 #x = MeasurementData('C:\\Users\\Martin\\OneDrive\\Promotion\\PERM\\raw_data\\HY_SA2_3.txt')
 #x.interpolate_data()
 
 x = Main('C:\\Users\\Martin\\OneDrive\\Promotion\\PERM\\raw_data\\HY_V9.txt')
-x.optimize_measurement_intervals([1e-22, 0.001])
+x.optimize_measurement_manual([1e-22, 0.001])
+
+
+
+
+
+
 
 '''
 data = pd.DataFrame({
