@@ -51,7 +51,7 @@ class MeasurementData:
         return data_log_scale
 
     def get_manual_coordinates(self, data):
-        coordinates = []
+        x_coordinates = []
         while True:
             user_input = input('Messintervalle ok?')
             if user_input == 'y':
@@ -60,7 +60,7 @@ class MeasurementData:
                 ax.time_onclick = time.time()
             def onrelease(event, ax):
                 if (time.time() - ax.time_onclick) < 0.1:
-                    coordinates.append(event.xdata)
+                    x_coordinates.append(event.xdata)
                     print(event.xdata, event.ydata)
                     plt.plot(event.xdata, event.ydata, 'r+')
                     fig.canvas.draw()
@@ -76,9 +76,11 @@ class MeasurementData:
             ax.grid()
             plt.show()
         # get nearest row index for each x-coordinate from user input
-        coordinates = [data['Duration'].sub(i).abs().idxmin() for i in coordinates]
-        coordinates.append(data.index[-1])
-        return coordinates
+        time_index = [data['Duration'].sub(i).abs().idxmin() for i in x_coordinates]
+        # add first and last time point of the measurement to the manual selected coordinates
+        time_index.extend([0, data.index[-1]])
+        time_index.sort()
+        return time_index
 
     def prepare_data(self, **kwargs):
         kwargs.setdefault('set_start_time_to_max_pressure', True)
@@ -174,13 +176,13 @@ class MeasurementData:
         log_time_scale = np.geomspace(time_min, time_max, amount_of_data_points).round(2)
         return log_time_scale
 
-    def create_log_time_manual(self, data, coordinates):
-        time_min = 1
+    def create_log_time_manual(self, data, time_index):
+        log_time_scale = []
         #TODO: passende Namen für die nested lists, da diese nicht identisch mit den Datentypen der oberen Funktionen sind
-        time_max = data.iloc[coordinates, 0].to_list()
+        time_values = data.iloc[time_index, 0].to_list()
         amount_of_data_points = 100
-        temp = np.geomspace(time_min, time_max, amount_of_data_points).round(2)
-        log_time_scale = list(map(list, zip(*temp)))
+        for i in range(len(time_values)-1):
+            log_time_scale.append(np.geomspace(time_values[i], time_values[i + 1], amount_of_data_points).round(2))
         return log_time_scale
 
     def get_general_data(self):
@@ -333,9 +335,9 @@ class LinearSystem:
             inlet_pressure_calculated.append(cell_pressure[0])
             outlet_pressure_calculated.append(cell_pressure[-1])
 
-        result = [inlet_pressure_calculated, outlet_pressure_calculated]
+        result = [self.measured_data['duration'], inlet_pressure_calculated, outlet_pressure_calculated]
         chamber_pressure = pd.DataFrame(result).transpose()
-        chamber_pressure.columns = ['Inlet_Pressure', 'Outlet_Pressure']
+        chamber_pressure.columns = ['Duration', 'Inlet_Pressure', 'Outlet_Pressure']
         return chamber_pressure, cell_pressure
 
     def set_stepsize_dt(self, step: int) -> float:
@@ -442,7 +444,7 @@ class Optimizer:
         chamber_pressure, _ = LinearSystem(self.measured_data,
                                            self.general_data,
                                            self.initial_guess).solve_linear_system()
-        return chamber_pressure, min_result.x[0]
+        return chamber_pressure, min_result
 
     def iteration(self, guess):
         guess = [guess[0], self.initial_guess[1]]
@@ -473,6 +475,7 @@ class Main:
         self.measured_data = None
         self.general_data = None
         self.chamber_pressure = None
+        self.min_result = None
 
     def single_run(self, initial_guess):
         self.set_data('2KA')
@@ -498,8 +501,8 @@ class Main:
         self.general_data = MeasurementData(self.path).get_general_data()
         for step in range(1,6):
             self.measured_data = MeasurementData(self.path).interpolate_data(step=step)
-            self.chamber_pressure, k = Optimizer(self.measured_data, self.general_data, initial_guess).nelder_mead()
-            k_interval.append(k)
+            self.chamber_pressure, self.min_result.x[0] = Optimizer(self.measured_data, self.general_data, initial_guess).nelder_mead()
+            k_interval.append(self.min_result.x[0])
             time_interval.append(self.measured_data['Duration'].max())
         #TODO: Variable name
         plot_result = Plotter(self.measured_data, **{'calc_data': self.chamber_pressure,
@@ -507,13 +510,27 @@ class Main:
                                                      'name': 'Messung'})
         plot_result.plot_calculation_chart()
 
-
     def optimize_measurement_manual(self, initial_guess):
-        self.general_data = MeasurementData(self.path).get_general_data()
-        self.measured_data = MeasurementData(self.path).interpolate_data(manual=True)
-        for i in range(len(self.measured_data)):
-            self.chamber_pressure, _ = Optimizer(self.measured_data[i], self.general_data,
-                                             initial_guess).nelder_mead()
+        self.set_data('manual')
+        number_of_intervals = len(self.measured_data)
+        chamber_pressure_intervall = pd.DataFrame(columns=['Duration', 'Inlet_Pressure', 'Outlet_Pressure'])
+        df = pd.DataFrame(columns=['Hours', 'Permeability', 'Real_Permeability', 'Relative_Error'],
+                          index=range(0, number_of_intervals))
+        for i in range(number_of_intervals):
+            self.chamber_pressure, self.min_result = Optimizer(self.measured_data[i],
+                                                               self.general_data, initial_guess).nelder_mead()
+            df = self.create_output(df, i)
+            # TODO: initialdruck im n+1 Intervall anpassen, dieser ist nicht mehr der atmosphärendruck
+            chamber_pressure_intervall = chamber_pressure_intervall.append(self.chamber_pressure)
+        print(df)
+
+    def create_output(self, df, i):
+        measurement_time_in_hours = self.measured_data[i]['Duration'].max() / 3600
+        df.loc[i, 'Hours'] = round(measurement_time_in_hours, 1)
+        df.loc[i, 'Permeability'] = self.min_result.x[0]
+        df.loc[i, 'Relative_Error'] = round(self.min_result.fun, 2)
+        return df
+
 
     def set_data(self, measurement_typ='2KA'):
         if measurement_typ == '2KA':
@@ -522,6 +539,9 @@ class Main:
         elif measurement_typ == 'Reaktor':
             self.measured_data = MeasurementDataReaktor(self.path).interpolate_data()
             self.general_data = MeasurementDataReaktor(self.path).get_general_data()
+        elif measurement_typ == 'manual':
+            self.general_data = MeasurementData(self.path).get_general_data()
+            self.measured_data = MeasurementData(self.path).interpolate_data(manual=True)
 
     def plot_result(self):
         filename, _ = os.path.splitext(os.path.split(self.path)[1])
