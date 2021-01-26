@@ -448,7 +448,9 @@ class Optimizer:
         chamber_pressure, _ = LinearSystem(self.measured_data,
                                            self.general_data,
                                            self.initial_guess).solve_linear_system()
-        self.print_output(min_result)
+        real_permeability = self.klinkenberg(chamber_pressure, min_result.x[0])
+        self.print_output(min_result, real_permeability)
+
         return chamber_pressure, min_result
 
     def optimize_function(self, guess):
@@ -471,13 +473,27 @@ class Optimizer:
         relative_error = absolute_error / absolute_magnitude * 100
         return relative_error
 
-    def print_output(self, min_result):
+    def klinkenberg(self,chamber_pressure, k_s):
+        inlet_pressure = chamber_pressure.iloc[-1, 1]
+        outlet_pressure = chamber_pressure.iloc[-1, 2]
+        mean_pressure = (inlet_pressure + outlet_pressure) / 2 * 1e-5
+        k_i = k_s * 1e-10
+
+        for _ in range(5):
+            f = 3.05351e-6 * k_i ** 0.65 / mean_pressure + k_i - k_s
+            f_diff = 1.98478e-6 / (mean_pressure * k_i ** 0.35) + 1
+            k_new = k_i - f / f_diff
+            k_i = k_new
+        return k_i
+
+    def print_output(self, min_result, real_permeability):
         print(f'Calculation finished: {min_result.message} \n'
               f'\tNumber of iterations: {min_result.nit} \n'
               f'\tNumber of function evaluations: {min_result.nfev} \n\n'
-              f'\tPermeability: {min_result.x[0]:.4} m²\n'
-              f'\tReal permeability: {"Platzhalter"} m²\n'
+              f'\tPermeability: {min_result.x[0]:.2} m²\n'
+              f'\tReal permeability: {real_permeability:.2} m²\n'
               f'\tRelative error: {round(min_result.fun, 2)} %')
+
 
 class Main:
 
@@ -515,7 +531,7 @@ class Main:
             self.chamber_pressure, self.min_result.x[0] = Optimizer(self.measured_data, self.general_data, initial_guess).nelder_mead()
             k_interval.append(self.min_result.x[0])
             time_interval.append(self.measured_data['Duration'].max())
-        #TODO: Variable name
+        # TODO: Variable name
         plot_result = Plotter(self.measured_data, **{'calc_data': self.chamber_pressure,
                                                      'intervals': [k_interval, time_interval],
                                                      'name': 'Messung'})
@@ -547,7 +563,6 @@ class Main:
         df.loc[i, 'Relative_Error'] = round(self.min_result.fun, 2)
         return df
 
-
     def set_data(self, measurement_typ='2KA'):
         if measurement_typ == '2KA':
             self.measured_data = MeasurementData(self.path).interpolate_data()
@@ -558,7 +573,6 @@ class Main:
         elif measurement_typ == 'manual':
             self.measured_data = MeasurementDataReaktor(self.path).interpolate_data(manual=True)
             self.general_data = MeasurementDataReaktor(self.path).get_general_data()
-
 
     def plot_result(self):
         filename, _ = os.path.splitext(os.path.split(self.path)[1])
