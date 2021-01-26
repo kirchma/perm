@@ -51,30 +51,13 @@ class MeasurementData:
         return data_log_scale
 
     def get_manual_coordinates(self, data):
-        x_coordinates = []
         while True:
+            plot_result = Plotter(data, **{'name': self.filename})
+            x_coordinates = plot_result.plot_select_interval()
+
             user_input = input('Messintervalle ok?')
             if user_input == 'y':
                 break
-            def onclick(event, ax):
-                ax.time_onclick = time.time()
-            def onrelease(event, ax):
-                if (time.time() - ax.time_onclick) < 0.1:
-                    x_coordinates.append(event.xdata)
-                    print(event.xdata, event.ydata)
-                    plt.plot(event.xdata, event.ydata, 'r+')
-                    fig.canvas.draw()
-
-            fig = plt.figure(figsize=(12, 9))
-            ax = fig.add_subplot(111)
-            ax.semilogx(data['Duration'], data['Inlet_Pressure'])
-            fig.canvas.mpl_connect('button_press_event', lambda event: onclick(event, ax))
-            fig.canvas.mpl_connect('button_release_event', lambda event: onrelease(event, ax))
-            ax.set_title('Messintervalle', fontsize=16)
-            ax.set_xlabel('Messwerte', fontsize=16)
-            ax.set_ylabel('Eingangsdruck in MPa', fontsize=16)
-            ax.grid()
-            plt.show()
         # get nearest row index for each x-coordinate from user input
         time_index = [data['Duration'].sub(i).abs().idxmin() for i in x_coordinates]
         # add first and last time point of the measurement to the manual selected coordinates
@@ -95,9 +78,9 @@ class MeasurementData:
             time_adjusted_data = self.reset_duration(time_adjusted_data)
         plot_before_adjustment = Plotter(converted_data,
                                          **{'start': self.start, 'stop': self.stop, 'name': self.filename})
-        #plot_before_adjustment.plot_measurement_chart()
+        plot_before_adjustment.plot_measurement_chart()
         plot_after_adjustment = Plotter(time_adjusted_data, **{'name': self.filename})
-        #plot_after_adjustment.plot_measurement_chart()
+        plot_after_adjustment.plot_measurement_chart()
         return time_adjusted_data
 
     @staticmethod
@@ -265,7 +248,7 @@ class Plotter:
             setattr(self, key, value)
 
     def plot_measurement_chart(self):
-        plt.figure(figsize=(14, 8))
+        self.setup_figure()
         plt.semilogx(self.df['Duration'], self.df['Inlet_Pressure'], color='C0', linestyle='-')
         plt.semilogx(self.df['Duration'], self.df['Outlet_Pressure'], color='C0', linestyle='-')
         try:
@@ -273,21 +256,14 @@ class Plotter:
             plt.axvline(x=self.df.iloc[self.stop - 1, 0], color='black', linestyle='--')
         except:
             pass
-        plt.title(self.name, fontsize=16)
-        plt.xlabel('Zeit in s', fontsize=16)
-        plt.ylabel('Druck in MPa', fontsize=16)
-        plt.grid(True, which='major')
-        plt.grid(True, which='minor', linestyle='--')
-        plt.grid(True)
         plt.show()
 
     def plot_calculation_chart(self):
-        fig = plt.figure(figsize=(14, 8))
-        ax = fig.add_subplot(111)
+        self.setup_figure()
         plt.semilogx(self.df['Duration'], self.df['Inlet_Pressure'], color='C0', linestyle='-', label='Messwerte')
         plt.semilogx(self.df['Duration'], self.df['Outlet_Pressure'], color='C0', linestyle='-')
-        plt.scatter(self.df['Duration'], self.calc_data['Inlet_Pressure'] * 1e-6, color='r', s=3, label='Rechenwerte')
-        plt.scatter(self.df['Duration'], self.calc_data['Outlet_Pressure'] * 1e-6, color='r', s=3)
+        plt.scatter(self.calc_data['Duration'], self.calc_data['Inlet_Pressure'] * 1e-6, color='r', s=3, label='Rechenwerte')
+        plt.scatter(self.calc_data['Duration'], self.calc_data['Outlet_Pressure'] * 1e-6, color='r', s=3)
         # plot stepwise solution
         try:
             self.intervals[1]
@@ -297,18 +273,45 @@ class Plotter:
             ax2.set_ylim(10 ** np.ceil(np.log10(k_intervals_sorted[-1])), 10 ** (np.ceil(np.log10(k_intervals_sorted[0])) - 1))
             ax2.set_yscale('log')
             ax2.set_ylabel('Permeabilität [m²]', fontsize=16)
-        except:
+        except AttributeError:
             pass
-
-        ax.legend()
-        ax.grid(True)
-        ax.grid(True, which='minor', linestyle='--')
-        ax.set_xlim(left=1)
-        ax.set_xlabel('Zeit in s', fontsize=16)
-        ax.set_ylabel('Druck in MPa', fontsize=16)
-        ax.set_title(self.name, fontsize=16)
+        plt.legend()
         plt.show()
 
+    def plot_select_interval(self):
+        x_coordinates = []
+
+        def onclick(event, ax):
+            ax.time_onclick = time.time()
+
+        def onrelease(event, ax):
+            if (time.time() - ax.time_onclick) < 0.1:
+                x_coordinates.append(event.xdata)
+                print(event.xdata, event.ydata)
+                plt.plot(event.xdata, event.ydata, 'r+')
+                fig.canvas.draw()
+
+        fig = plt.figure(figsize=(12, 9))
+        ax = fig.add_subplot(111)
+        ax.semilogx(self.df['Duration'], self.df['Inlet_Pressure'])
+        fig.canvas.mpl_connect('button_press_event', lambda event: onclick(event, ax))
+        fig.canvas.mpl_connect('button_release_event', lambda event: onrelease(event, ax))
+        ax.set_title('Messintervalle', fontsize=16)
+        ax.set_xlabel('Messwerte', fontsize=16)
+        ax.set_ylabel('Eingangsdruck in MPa', fontsize=16)
+        ax.grid()
+        plt.show()
+        return x_coordinates
+
+    def setup_figure(self):
+        fig = plt.figure(figsize=(14, 8))
+        ax = fig.add_subplot(111)
+        plt.title(self.name, fontsize=16)
+        plt.xlabel('Zeit in s', fontsize=16)
+        plt.ylabel('Druck in MPa', fontsize=16)
+        plt.grid(True, which='major')
+        plt.grid(True, which='minor', linestyle='--')
+        plt.grid(True)
 
 class LinearSystem:
     number_of_cells = 51
@@ -422,7 +425,9 @@ class LinearSystem:
                                          'P', pressure, self.general_data['gas']))
         except:
             # TODO add error handling
-            pass
+            result = [np.ones(self.number_of_cells),
+                      np.ones(self.number_of_cells),
+                      np.ones(self.number_of_cells)]
         return result
 
 
@@ -436,17 +441,17 @@ class Optimizer:
         self.k_iterative = []
 
     def nelder_mead(self):
-        min_result = optimize.minimize(self.iteration, self.initial_guess[0], method='Nelder-Mead',
-                                       options={'disp': True}, tol=0.001)
-        print(min_result)
+        min_result = optimize.minimize(self.optimize_function, self.initial_guess[0], method='Nelder-Mead',
+                                       options={'disp': False}, tol=0.001)
         # recalculate with best fit parameters
         self.initial_guess[0] = min_result.x
         chamber_pressure, _ = LinearSystem(self.measured_data,
                                            self.general_data,
                                            self.initial_guess).solve_linear_system()
+        self.print_output(min_result)
         return chamber_pressure, min_result
 
-    def iteration(self, guess):
+    def optimize_function(self, guess):
         guess = [guess[0], self.initial_guess[1]]
         chamber_pressure, _ = LinearSystem(self.measured_data,
                                            self.general_data,
@@ -460,13 +465,19 @@ class Optimizer:
         p_out_ref = self.measured_data['Outlet_Pressure'] * 1e6
         p_in = p['Inlet_Pressure']
         p_out = p['Outlet_Pressure']
-
         absolute_magnitude = np.sqrt(sum(p_in_ref**2 + p_out_ref**2))
         difference_measured_calculated = abs(p_in_ref - p_in) + abs(p_out_ref - p_out)
         absolute_error = np.sqrt(sum(difference_measured_calculated**2))
         relative_error = absolute_error / absolute_magnitude * 100
         return relative_error
 
+    def print_output(self, min_result):
+        print(f'Calculation finished: {min_result.message} \n'
+              f'\tNumber of iterations: {min_result.nit} \n'
+              f'\tNumber of function evaluations: {min_result.nfev} \n\n'
+              f'\tPermeability: {min_result.x[0]:.4} m²\n'
+              f'\tReal permeability: {"Platzhalter"} m²\n'
+              f'\tRelative error: {round(min_result.fun, 2)} %')
 
 class Main:
 
@@ -513,7 +524,7 @@ class Main:
     def optimize_measurement_manual(self, initial_guess):
         self.set_data('manual')
         number_of_intervals = len(self.measured_data)
-        chamber_pressure_intervall = pd.DataFrame(columns=['Duration', 'Inlet_Pressure', 'Outlet_Pressure'])
+        chamber_pressure_interval = pd.DataFrame(columns=['Duration', 'Inlet_Pressure', 'Outlet_Pressure'])
         df = pd.DataFrame(columns=['Hours', 'Permeability', 'Real_Permeability', 'Relative_Error'],
                           index=range(0, number_of_intervals))
         for i in range(number_of_intervals):
@@ -521,7 +532,12 @@ class Main:
                                                                self.general_data, initial_guess).nelder_mead()
             df = self.create_output(df, i)
             # TODO: initialdruck im n+1 Intervall anpassen, dieser ist nicht mehr der atmosphärendruck
-            chamber_pressure_intervall = chamber_pressure_intervall.append(self.chamber_pressure)
+            chamber_pressure_interval = chamber_pressure_interval.append(self.chamber_pressure)
+        # reset measured data for plotting
+        # TODO: Plotten deaktivieren
+        self.set_data('Reaktor')
+        self.chamber_pressure = chamber_pressure_interval
+        self.plot_result()
         print(df)
 
     def create_output(self, df, i):
@@ -540,37 +556,15 @@ class Main:
             self.measured_data = MeasurementDataReaktor(self.path).interpolate_data()
             self.general_data = MeasurementDataReaktor(self.path).get_general_data()
         elif measurement_typ == 'manual':
-            self.general_data = MeasurementData(self.path).get_general_data()
-            self.measured_data = MeasurementData(self.path).interpolate_data(manual=True)
+            self.measured_data = MeasurementDataReaktor(self.path).interpolate_data(manual=True)
+            self.general_data = MeasurementDataReaktor(self.path).get_general_data()
+
 
     def plot_result(self):
         filename, _ = os.path.splitext(os.path.split(self.path)[1])
-
         plot_result = Plotter(self.measured_data, **{'calc_data': self.chamber_pressure, 'name': filename})
         plot_result.plot_calculation_chart()
 
-#x = MeasurementData('C:\\Users\\Martin\\OneDrive\\Promotion\\PERM\\raw_data\\HY_SA2_3.txt')
-#x.interpolate_data()
 
-x = Main('C:\\Users\\Martin\\OneDrive\\Promotion\\PERM\\raw_data\\HY_V9.txt')
-x.optimize_measurement_manual([1e-22, 0.001])
-
-
-
-
-
-
-
-'''
-data = pd.DataFrame({
-    'Inlet_Pressure': [10, 9.9, 9.8],
-    'Outlet_Pressure': [0.1, 0.2, 0.3],
-    'Duration': [1, 1000, 10000],
-    'Temperature': [15.18, 15.18, 15.18]})
-general_data = {'area': np.pi * 0.25 * 0.1**2, 'length': 0.2, 'gas': 'H2',
-                'inlet_chamber_volume': 150*1e-6, 'outlet_chamber_volume': 160*1e-6}
-initial_guess = [1e-16, 0.01]
-
-x = Optimizer(data, general_data, initial_guess)
-x.gradient_descent()
-'''
+x = Main('C:\\Users\\Martin\\OneDrive\\Promotion\\PERM\\raw_data\\HY_S3.txt')
+x.optimize_perm_1d([1e-22, 0.001])
