@@ -76,10 +76,10 @@ class MeasurementData:
             time_adjusted_data = self.set_start_time_to_max_pressure(time_adjusted_data)
         else:
             time_adjusted_data = self.reset_duration(time_adjusted_data)
-        plot_before_adjustment = Plotter(converted_data,
-                                         **{'start': self.start, 'stop': self.stop, 'name': self.filename})
-        plot_before_adjustment.plot_measurement_chart()
-        plot_after_adjustment = Plotter(time_adjusted_data, **{'name': self.filename})
+
+        plot_after_adjustment = Plotter(time_adjusted_data, **{'data_before_adjustment': converted_data,
+                                                               'start': self.start, 'stop': self.stop,
+                                                               'name': self.filename})
         plot_after_adjustment.plot_measurement_chart()
         return time_adjusted_data
 
@@ -247,15 +247,39 @@ class Plotter:
         for key, value in kwargs.items():
             setattr(self, key, value)
 
+    def run_once(f):
+        def wrapper(*args, **kwargs):
+            if not wrapper.has_run:
+                wrapper.has_run = True
+                return f(*args, **kwargs)
+        wrapper.has_run = False
+        return wrapper
+
+    @run_once
     def plot_measurement_chart(self):
-        self.setup_figure()
+        fig = plt.figure(figsize=(12, 12))
+        plt.subplot(2, 1, 1)
+        plt.title(self.name, fontsize=16)
+        plt.xlabel('Zeit in s', fontsize=16)
+        plt.ylabel('Druck in MPa', fontsize=16)
+        plt.grid(True, which='major')
+        plt.grid(True, which='minor', linestyle='--')
+        plt.grid(True)
+        plt.semilogx(self.data_before_adjustment['Duration'], self.data_before_adjustment['Inlet_Pressure'], color='C0',
+                     linestyle='-')
+        plt.semilogx(self.data_before_adjustment['Duration'], self.data_before_adjustment['Outlet_Pressure'],
+                     color='C0', linestyle='-')
+        plt.axvline(x=self.data_before_adjustment.iloc[self.start, 0], color='black', linestyle='--')
+        plt.axvline(x=self.data_before_adjustment.iloc[self.stop - 1, 0], color='black', linestyle='--')
+
+        plt.subplot(2, 1, 2)
+        plt.xlabel('Zeit in s', fontsize=16)
+        plt.ylabel('Druck in MPa', fontsize=16)
+        plt.grid(True, which='major')
+        plt.grid(True, which='minor', linestyle='--')
+        plt.grid(True)
         plt.semilogx(self.df['Duration'], self.df['Inlet_Pressure'], color='C0', linestyle='-')
         plt.semilogx(self.df['Duration'], self.df['Outlet_Pressure'], color='C0', linestyle='-')
-        try:
-            plt.axvline(x=self.df.iloc[self.start, 0], color='black', linestyle='--')
-            plt.axvline(x=self.df.iloc[self.stop - 1, 0], color='black', linestyle='--')
-        except:
-            pass
         plt.show()
 
     def plot_calculation_chart(self):
@@ -305,7 +329,6 @@ class Plotter:
 
     def setup_figure(self):
         fig = plt.figure(figsize=(14, 8))
-        ax = fig.add_subplot(111)
         plt.title(self.name, fontsize=16)
         plt.xlabel('Zeit in s', fontsize=16)
         plt.ylabel('Druck in MPa', fontsize=16)
@@ -528,7 +551,7 @@ class Main:
         self.general_data = MeasurementData(self.path).get_general_data()
         for step in range(1,6):
             self.measured_data = MeasurementData(self.path).interpolate_data(step=step)
-            self.chamber_pressure, self.min_result.x[0] = Optimizer(self.measured_data, self.general_data, initial_guess).nelder_mead()
+            self.chamber_pressure, self.min_result = Optimizer(self.measured_data, self.general_data, initial_guess).nelder_mead()
             k_interval.append(self.min_result.x[0])
             time_interval.append(self.measured_data['Duration'].max())
         # TODO: Variable name
@@ -580,5 +603,5 @@ class Main:
         plot_result.plot_calculation_chart()
 
 
-x = Main('C:\\Users\\Martin\\OneDrive\\Promotion\\PERM\\raw_data\\HY_S3.txt')
+x = Main('C:\\Users\\Martin\\OneDrive\\Promotion\\PERM\\raw_data\\HY_V9.txt')
 x.optimize_perm_1d([1e-22, 0.001])
