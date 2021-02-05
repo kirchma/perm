@@ -1,4 +1,7 @@
 name startdate enddate length outer_diameter inner_diameter unit gas fix_time rock
+HY_RV1 02.09.2020 16.09.2020 0.8000 0.3000 0.1700 7 H2 6 cement/casing
+HY_RV1_2 16.10.202021.10.2020 0.8000 0.3000 0.1700 7 H2 4 cement/casing
 HY_RV2 15.12.2020 18.12.2020 0.1600 0.3000 0.1700 7 H2 6 cement/casing
 HY_RV2_2 15.01.2021 18.01.2021 0.1600 0.3000 0.1700 7 H2 1 cement/casing
 HY_RV2_3 20.01.2021 22.01.2021 0.1600 0.3000 0.1700 7 H2 6 cement/casing
+HY_RV2_4 27.01.2021 03.02.2021 0.1600 0.3000 0.1700 7 H2 17 cement/casing

@@ -234,7 +234,7 @@ class MeasurementDataReaktor(MeasurementData):
         ml_to_m3 = 1e-6
 
         database.set_index('name', inplace=True)
-        used_unit = database.loc[self.filename, 'unit']
+        used_unit = int(database.loc[self.filename, 'unit'])
         filt = all_units['number'] == used_unit
         chamber_volume = all_units.loc[filt, ['inlet_chamber_in_ml', 'outlet_chamber_in_ml']]
         return chamber_volume.values[0] * ml_to_m3
@@ -335,6 +335,7 @@ class Plotter:
         plt.grid(True, which='major')
         plt.grid(True, which='minor', linestyle='--')
         plt.grid(True)
+
 
 class LinearSystem:
     number_of_cells = 51
@@ -463,11 +464,17 @@ class Optimizer:
         self.error = []
         self.k_iterative = []
 
-    def nelder_mead(self):
-        min_result = optimize.minimize(self.optimize_function, self.initial_guess[0], method='Nelder-Mead',
-                                       options={'disp': False}, tol=0.001)
+    def nelder_mead(self, parameter):
+        if parameter == 'k':
+            min_result = optimize.minimize(self.optimize_function, self.initial_guess[0], args=parameter,
+                                           method='Nelder-Mead', options={'disp': False}, tol=0.001)
+            self.initial_guess[0] = min_result.x
+        elif parameter == 'both':
+            min_result = optimize.minimize(self.optimize_function, self.initial_guess, args=parameter,
+                                           method='Nelder-Mead', options={'disp': False}, tol=0.001)
+            self.initial_guess = min_result.x
+
         # recalculate with best fit parameters
-        self.initial_guess[0] = min_result.x
         chamber_pressure, _ = LinearSystem(self.measured_data,
                                            self.general_data,
                                            self.initial_guess).solve_linear_system()
@@ -475,9 +482,13 @@ class Optimizer:
         self.print_output(min_result, real_permeability)
 
         return chamber_pressure, min_result
+        
+    def optimize_function(self, guess, parameter):
+        if parameter == 'k':
+            guess = [guess[0], self.initial_guess[1]]
+        elif parameter == 'both':
+            guess = guess
 
-    def optimize_function(self, guess):
-        guess = [guess[0], self.initial_guess[1]]
         chamber_pressure, _ = LinearSystem(self.measured_data,
                                            self.general_data,
                                            guess).solve_linear_system()
@@ -510,11 +521,12 @@ class Optimizer:
         return k_i
 
     def print_output(self, min_result, real_permeability):
-        print(f'Calculation finished: {min_result.message} \n'
+        print(f'\nCalculation finished: {min_result.message} \n'
               f'\tNumber of iterations: {min_result.nit} \n'
               f'\tNumber of function evaluations: {min_result.nfev} \n\n'
               f'\tPermeability: {min_result.x[0]:.2} m²\n'
               f'\tReal permeability: {real_permeability:.2} m²\n'
+              f'\tPorosity: {self.initial_guess[1]*100:.2} %\n'
               f'\tRelative error: {round(min_result.fun, 2)} %')
 
 
@@ -533,16 +545,16 @@ class Main:
                                                 initial_guess).solve_linear_system()
         self.plot_result()
 
-    def optimize_perm_1d(self, initial_guess):
+    def calculate_permeability(self, initial_guess, parameter='k'):
         self.set_data('2KA')
         self.chamber_pressure, _ = Optimizer(self.measured_data, self.general_data,
-                                             initial_guess).nelder_mead()
+                                             initial_guess).nelder_mead(parameter)
         self.plot_result()
 
-    def optimize_reaktor(self, initial_guess):
+    def optimize_reaktor(self, initial_guess, parameter='k'):
         self.set_data('Reaktor')
         self.chamber_pressure, _ = Optimizer(self.measured_data, self.general_data,
-                                             initial_guess).nelder_mead()
+                                             initial_guess).nelder_mead(parameter)
         self.plot_result()
 
     def optimize_measurement_intervals(self, initial_guess):
@@ -604,4 +616,4 @@ class Main:
 
 
 x = Main('C:\\Users\\Martin\\OneDrive\\Promotion\\PERM\\raw_data\\HY_V9.txt')
-x.optimize_perm_1d([1e-22, 0.001])
+x.calculate_permeability([1e-20, 0.001])
