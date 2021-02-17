@@ -80,7 +80,7 @@ class MeasurementData:
         plot_after_adjustment = Plotter(time_adjusted_data, **{'data_before_adjustment': converted_data,
                                                                'start': self.start, 'stop': self.stop,
                                                                'name': self.filename})
-        plot_after_adjustment.plot_measurement_chart()
+        #plot_after_adjustment.plot_measurement_chart()
         return time_adjusted_data
 
     @staticmethod
@@ -382,6 +382,8 @@ class LinearSystem:
         while difference > 1e-4 and inner_iteration <= max_iteration:
             coefficient_matrix, _ = self.get_linear_system(cell_pressure)
             cell_pressure_new = scipy.sparse.linalg.spsolve(coefficient_matrix, solution_vector)
+            # iterativer Loeser, kann genutzt werden, ist bei dem kleinen Gleichungssystem aber langsamer
+            #cell_pressure_new, code = scipy.sparse.linalg.cg(coefficient_matrix, solution_vector, tol=1e-10)
             difference = self.l2_norm(cell_pressure_new, cell_pressure)
             cell_pressure = cell_pressure_new
             inner_iteration += 1
@@ -409,7 +411,36 @@ class LinearSystem:
         l2_diff = np.sqrt(np.sum((p - p_ref) ** 2))
         l2_ref = np.sqrt(np.sum(p_ref ** 2))
         return l2_diff / l2_ref
+    '''
+    crank-nicolson
+    def build_diagonals(self, cell_pressure: np.ndarray):
+        k, n = self.initialize_permeability_porosity()
+        compressibility, viscosity, density = self.get_coolprop_data(cell_pressure)
+        dx = self.general_data['length'] / (self.number_of_cells - 1)
+        dt = self.calculated_data['dt']
 
+        viscosity_mean = (viscosity[1:] + viscosity[:-1]) / 2
+        density_mean = (density[1:] + density[:-1]) / 2
+        k_mean_harmonic = ((2 * k[1:] * k[:-1]) / (k[1:] + k[:-1]))
+
+        off_diagonal = (density_mean * self.general_data['area'] * k_mean_harmonic) / (viscosity_mean * dx)
+        main_diagonal = (self.general_data['area'] * n * compressibility * density * dx) * 2 / dt
+        main_diagonal[1:-1] = main_diagonal[1:-1] + off_diagonal[:-1] + off_diagonal[1:]
+        main_diagonal[0] = (self.general_data['inlet_chamber_volume'] * density[0] * compressibility[0]) * 2 / \
+                           dt + off_diagonal[0]
+        main_diagonal[-1] = (self.general_data['outlet_chamber_volume'] * density[-1] * compressibility[-1]) * 2 / \
+                           dt + off_diagonal[-1]
+
+        solution_vector = self.general_data['area'] * n * compressibility * density * dx * 2 / dt
+        solution_vector[1:-1] = (solution_vector[1:-1] - off_diagonal[:-1] - off_diagonal[1:]) * cell_pressure[1:-1] + \
+                                off_diagonal[:-1] * cell_pressure[:-2] + off_diagonal[1:] * cell_pressure[2:]
+        solution_vector[0] = (self.general_data['inlet_chamber_volume'] * density[0] * compressibility[0]
+                              * 2 / dt - off_diagonal[0]) * cell_pressure[0] + off_diagonal[0] * cell_pressure[1]
+        solution_vector[-1] = (self.general_data['outlet_chamber_volume'] * density[-1] * compressibility[-1]
+                               * 2 / dt - off_diagonal[-1]) * cell_pressure[-1] + off_diagonal[-1] * cell_pressure[-2]
+
+        return main_diagonal, off_diagonal, solution_vector
+    '''
     def build_diagonals(self, cell_pressure: np.ndarray):
         k, n = self.initialize_permeability_porosity()
         compressibility, viscosity, density = self.get_coolprop_data(cell_pressure)
@@ -539,6 +570,51 @@ class Main:
         self.chamber_pressure = None
         self.min_result = None
 
+    def test_mesh(self, initial_guess):
+        grid_dimensions = [100, 50, 25]
+        p_list = []
+        for i in range(len(grid_dimensions)):
+            LinearSystem.number_of_cells = grid_dimensions[i]
+            self.set_data('2KA')
+            self.chamber_pressure, cell_pressure = LinearSystem(self.measured_data, self.general_data,
+                                                                initial_guess).solve_linear_system()
+            p_list.append(cell_pressure)
+
+        x_axis_0 = np.linspace(0, 200, grid_dimensions[0])
+        x_axis_1 = np.linspace(0, 200, grid_dimensions[1])
+        x_axis_2 = np.linspace(0, 200, grid_dimensions[2])
+
+        interpolate_function_0 = interp1d(x_axis_0, p_list[0])
+        interpolate_function_1 = interp1d(x_axis_1, p_list[1])
+        p_list[0] = interpolate_function_0(x_axis_2)
+        p_list[1] = interpolate_function_1(x_axis_2)
+
+        plt.plot(x_axis_2, p_list[0])
+        plt.plot(x_axis_2, p_list[1])
+        plt.plot(x_axis_2, p_list[2])
+        plt.show()
+
+        GCI1_list = []
+        GCI2_list = []
+
+        for i in range(grid_dimensions[2]):
+            fehlerordnung = np.log(abs((p_list[2][i] - p_list[1][i]) / (p_list[1][i] - p_list[0][i]))) / np.log(2)
+            e1 = (p_list[1][i] - p_list[0][i]) / p_list[0][i]
+            GCI1 = 1.25 * abs(e1) / (2**fehlerordnung - 1)
+            e2 = (p_list[2][i] - p_list[1][i]) / p_list[1][i]
+            GCI2 = 1.25 * abs(e2) / (2**fehlerordnung - 1)
+            GCI1_list.append(GCI1)
+            GCI2_list.append(GCI2)
+
+            print(f'Fehlerordnung = {round(fehlerordnung,2)}')
+            print(f'GCI_1 = {round(GCI1 * 100, 5)} %')
+            print(f'GCI_2 = {round(GCI2 * 100, 5)} %')
+            #print(GCI2/(2**fehlerordnung*GCI1))
+            print()
+
+        print('end')
+
+
     def single_run(self, initial_guess):
         self.set_data('2KA')
         self.chamber_pressure, _ = LinearSystem(self.measured_data, self.general_data,
@@ -614,6 +690,8 @@ class Main:
         plot_result = Plotter(self.measured_data, **{'calc_data': self.chamber_pressure, 'name': filename})
         plot_result.plot_calculation_chart()
 
-
+#HY_V9 3.2e-20, 0.001
 x = Main('C:\\Users\\Martin\\OneDrive\\Promotion\\PERM\\raw_data\\HY_V9.txt')
-x.calculate_permeability([1e-20, 0.001])
+x.test_mesh([1e-22, 0.001])
+
+
