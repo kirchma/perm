@@ -11,6 +11,8 @@ import CoolProp.CoolProp as cp
 
 class MeasurementData:
 
+    amount_of_data_points = 100
+
     def __init__(self, path):
         self.path = path
         self.filename, _ = os.path.splitext(os.path.split(path)[1])
@@ -80,7 +82,7 @@ class MeasurementData:
         plot_after_adjustment = Plotter(time_adjusted_data, **{'data_before_adjustment': converted_data,
                                                                'start': self.start, 'stop': self.stop,
                                                                'name': self.filename})
-        #plot_after_adjustment.plot_measurement_chart()
+        plot_after_adjustment.plot_measurement_chart()
         return time_adjusted_data
 
     @staticmethod
@@ -138,16 +140,14 @@ class MeasurementData:
         df['Duration'] = df['Duration'] - df.iloc[0, 0] + 1
         return df
 
-    @staticmethod
-    def create_log_time(data):
+    def create_log_time(self, data):
         time_min = 1
         time_max = int(data['Duration'].max())
-        amount_of_data_points = 100
-        log_time_scale = np.geomspace(time_min, time_max, amount_of_data_points).round(2)
+        #amount_of_data_points = 100
+        log_time_scale = np.geomspace(time_min, time_max, self.amount_of_data_points).round(2)
         return log_time_scale
 
-    @staticmethod
-    def create_log_time_intervall(data, step):
+    def create_log_time_intervall(self, data, step):
         max_step = 5
         time_min = 1
 
@@ -155,8 +155,8 @@ class MeasurementData:
             time_max = int(data['Duration'].max()) / max_step * step
         else:
             time_max = int(data['Duration'].max())
-        amount_of_data_points = 100
-        log_time_scale = np.geomspace(time_min, time_max, amount_of_data_points).round(2)
+        #amount_of_data_points = 100
+        log_time_scale = np.geomspace(time_min, time_max, self.amount_of_data_points).round(2)
         return log_time_scale
 
     def create_log_time_manual(self, data, time_index):
@@ -338,7 +338,7 @@ class Plotter:
 
 
 class LinearSystem:
-    number_of_cells = 51
+    number_of_cells = 50
 
     def __init__(self, data, general_data, initial_guess):
         self.measured_data = {'inlet_pressure': np.array(data['Inlet_Pressure'].values) * 1e6,
@@ -412,7 +412,7 @@ class LinearSystem:
         l2_ref = np.sqrt(np.sum(p_ref ** 2))
         return l2_diff / l2_ref
     '''
-    crank-nicolson
+    #crank-nicolson
     def build_diagonals(self, cell_pressure: np.ndarray):
         k, n = self.initialize_permeability_porosity()
         compressibility, viscosity, density = self.get_coolprop_data(cell_pressure)
@@ -606,14 +606,45 @@ class Main:
             GCI1_list.append(GCI1)
             GCI2_list.append(GCI2)
 
-            print(f'Fehlerordnung = {round(fehlerordnung,2)}')
+            print(f'Fehlerordnung = {round(fehlerordnung,3)}')
             print(f'GCI_1 = {round(GCI1 * 100, 5)} %')
             print(f'GCI_2 = {round(GCI2 * 100, 5)} %')
             #print(GCI2/(2**fehlerordnung*GCI1))
             print()
 
-        print('end')
+    def test_time_mesh(self, initial_guess):
+        time_steps = [200, 100, 50]
+        p_list = []
+        for i in range(len(time_steps)):
+            MeasurementData.amount_of_data_points = time_steps[i]
+            self.set_data('2KA')
+            self.chamber_pressure, cell_pressure = LinearSystem(self.measured_data, self.general_data,
+                                                                initial_guess).solve_linear_system()
+            p_list.append(cell_pressure)
 
+        x_axis = np.linspace(0, 200, 50)
+        plt.plot(x_axis, p_list[0])
+        plt.plot(x_axis, p_list[1])
+        plt.plot(x_axis, p_list[2])
+        plt.show()
+
+        GCI1_list = []
+        GCI2_list = []
+
+        for i in range(50):
+            fehlerordnung = np.log(abs((p_list[2][i] - p_list[1][i]) / (p_list[1][i] - p_list[0][i]))) / np.log(2)
+            e1 = (p_list[1][i] - p_list[0][i]) / p_list[0][i]
+            GCI1 = 1.25 * abs(e1) / (2 ** fehlerordnung - 1)
+            e2 = (p_list[2][i] - p_list[1][i]) / p_list[1][i]
+            GCI2 = 1.25 * abs(e2) / (2 ** fehlerordnung - 1)
+            GCI1_list.append(GCI1)
+            GCI2_list.append(GCI2)
+
+            print(f'Fehlerordnung = {round(fehlerordnung, 3)}')
+            print(f'GCI_1 = {round(GCI1 * 100, 5)} %')
+            print(f'GCI_2 = {round(GCI2 * 100, 5)} %')
+            # print(GCI2/(2**fehlerordnung*GCI1))
+            print()
 
     def single_run(self, initial_guess):
         self.set_data('2KA')
@@ -648,7 +679,7 @@ class Main:
                                                      'name': 'Messung'})
         plot_result.plot_calculation_chart()
 
-    def optimize_measurement_manual(self, initial_guess):
+    def optimize_measurement_manual(self, initial_guess, parameter='k'):
         self.set_data('manual')
         number_of_intervals = len(self.measured_data)
         chamber_pressure_interval = pd.DataFrame(columns=['Duration', 'Inlet_Pressure', 'Outlet_Pressure'])
@@ -656,7 +687,7 @@ class Main:
                           index=range(0, number_of_intervals))
         for i in range(number_of_intervals):
             self.chamber_pressure, self.min_result = Optimizer(self.measured_data[i],
-                                                               self.general_data, initial_guess).nelder_mead()
+                                                               self.general_data, initial_guess).nelder_mead(parameter)
             df = self.create_output(df, i)
             # TODO: initialdruck im n+1 Intervall anpassen, dieser ist nicht mehr der atmosphärendruck
             chamber_pressure_interval = chamber_pressure_interval.append(self.chamber_pressure)
@@ -691,7 +722,7 @@ class Main:
         plot_result.plot_calculation_chart()
 
 #HY_V9 3.2e-20, 0.001
-x = Main('C:\\Users\\Martin\\OneDrive\\Promotion\\PERM\\raw_data\\HY_V9.txt')
-x.test_mesh([1e-22, 0.001])
+x = Main('C:\\Users\\Martin\\OneDrive\\Promotion\\PERM\\raw_data\\HY_Z2.txt')
+x.calculate_permeability([1e-21, 0.001])
 
 
