@@ -377,7 +377,23 @@ class LinearSystem:
         inner_iteration = 0
         max_iteration = 10
         difference = 1
-
+        '''
+        diff_list = []
+        resi = 1
+        r_list = []
+        fig = plt.figure(figsize=(5, 9))
+        ax = fig.add_subplot(111)
+        ax.set_xlim([0, max_iteration])
+        ax.set_yscale('log')
+        ax.set_ylim([1e-20, 100])
+        line, = ax.plot(1)
+        line_2, = ax.plot(1)
+        plt.ion()
+        plt.grid(True, which='major')
+        ax.set_xlabel('Iterationen')
+        ax.set_ylabel('Fehler')
+        plt.show()
+        '''
         _, solution_vector = self.get_linear_system(cell_pressure)
         while difference > 1e-4 and inner_iteration <= max_iteration:
             coefficient_matrix, _ = self.get_linear_system(cell_pressure)
@@ -385,9 +401,22 @@ class LinearSystem:
             # iterativer Loeser, kann genutzt werden, ist bei dem kleinen Gleichungssystem aber langsamer
             #cell_pressure_new, code = scipy.sparse.linalg.cg(coefficient_matrix, solution_vector, tol=1e-10)
             difference = self.l2_norm(cell_pressure_new, cell_pressure)
+            '''
+            resi = self.resi(coefficient_matrix, cell_pressure, solution_vector)
+            r_list.append(resi)
+            diff_list.append(difference)
+            line.set_ydata(diff_list)
+            line.set_xdata(range(len(diff_list)))
+            line_2.set_ydata(r_list)
+            line_2.set_xdata(range(len(r_list)))
+            '''
             cell_pressure = cell_pressure_new
             inner_iteration += 1
         return cell_pressure
+
+    def resi(self, A, x_guess, b):
+        r = abs(np.sum((A*x_guess - b) / b))
+        return r
 
     def get_initial_pressure(self) -> np.ndarray:
         atmospheric_pressure = self.measured_data['outlet_pressure'][0]
@@ -722,7 +751,7 @@ class Main:
         plot_result.plot_calculation_chart()
 
 #HY_V9 3.2e-20, 0.001
-x = Main('C:\\Users\\Martin\\OneDrive\\Promotion\\PERM\\raw_data\\HY_Z2.txt')
-x.calculate_permeability([1e-21, 0.001])
+x = Main('C:\\Users\\Martin\\OneDrive\\Promotion\\PERM\\raw_data\\HY_Sx2_CH4.txt')
+x.single_run([1e-17, 0.001])
 
 
