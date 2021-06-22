@@ -79,6 +79,9 @@ class MeasurementData:
         else:
             time_adjusted_data = self.reset_duration(time_adjusted_data)
 
+        print(time_adjusted_data.to_string())
+        time_adjusted_data.drop('temp', axis=1, inplace=True)
+
         plot_after_adjustment = Plotter(time_adjusted_data, **{'data_before_adjustment': converted_data,
                                                                'start': self.start, 'stop': self.stop,
                                                                'name': self.filename})
@@ -95,10 +98,11 @@ class MeasurementData:
 
     @staticmethod
     def convert_data(df):
-        df['temp'] = pd.to_datetime(df['Date'] + df['Time'], format='%d.%m.%Y%X')
+        df['temp'] = pd.to_datetime(df['Date'] + df['Time'], format='%d.%m.%Y%X') #.%f
         df['Duration'] = pd.to_timedelta(df['temp'] - df['temp'][0]).dt.total_seconds()
-        df.drop(['Date', 'Time', 'temp'], axis=1, inplace=True)
-        df = df[['Duration', 'Inlet_Pressure', 'Outlet_Pressure', 'Confining_Pressure', 'Temperature']]
+        #df.drop(['Date', 'Time', 'temp'], axis=1, inplace=True)
+        df.drop(['Date', 'Time'], axis=1, inplace=True)
+        df = df[['Duration', 'temp', 'Inlet_Pressure', 'Outlet_Pressure', 'Confining_Pressure', 'Temperature']]
         # convert bar (relative) to Megapascal (absolute)
         df[['Inlet_Pressure', 'Outlet_Pressure', 'Confining_Pressure']] = \
             df[['Inlet_Pressure', 'Outlet_Pressure', 'Confining_Pressure']].apply(lambda x: x / 10 + 0.0977)
@@ -151,7 +155,11 @@ class MeasurementData:
         max_step = 5
         time_min = 1
 
-        if step < max_step:
+        if step == 1:
+            time_max = 3600
+        elif step == 2:
+            time_max = 86400
+        elif step < max_step:
             time_max = int(data['Duration'].max()) / max_step * step
         else:
             time_max = int(data['Duration'].max())
@@ -206,8 +214,9 @@ class MeasurementDataReaktor(MeasurementData):
     def convert_data(df):
         df['temp'] = pd.to_datetime(df['Date'] + df['Time'], format='%d.%m.%Y%X')
         df['Duration'] = pd.to_timedelta(df['temp'] - df['temp'][0]).dt.total_seconds()
-        df.drop(['Date', 'Time', 'temp'], axis=1, inplace=True)
-        df = df[['Duration', 'Inlet_Pressure', 'Outlet_Pressure',
+        #df.drop(['Date', 'Time', 'temp'], axis=1, inplace=True)
+        df.drop(['Date', 'Time'], axis=1, inplace=True)
+        df = df[['Duration', 'temp', 'Inlet_Pressure', 'Outlet_Pressure',
                  'Confining_Pressure_Reactor', 'Confining_Pressure_Sample', 'Temperature']]
         # convert bar (relative) to Megapascal (absolute)
         df[['Inlet_Pressure', 'Outlet_Pressure', 'Confining_Pressure_Reactor', 'Confining_Pressure_Sample']] = \
@@ -283,7 +292,15 @@ class Plotter:
         plt.show()
 
     def plot_calculation_chart(self):
-        self.setup_figure()
+        fig = plt.figure(figsize=(14, 8))
+        ax = fig.add_subplot(111)
+        plt.title(self.name, fontsize=16)
+        plt.xlabel('Zeit in s', fontsize=16)
+        plt.ylabel('Druck in MPa', fontsize=16)
+        plt.grid(True, which='major')
+        plt.grid(True, which='minor', linestyle='--')
+        ax.tick_params(axis='both', which='major', labelsize=16)
+
         plt.semilogx(self.df['Duration'], self.df['Inlet_Pressure'], color='C0', linestyle='-', label='Messwerte')
         plt.semilogx(self.df['Duration'], self.df['Outlet_Pressure'], color='C0', linestyle='-')
         plt.scatter(self.calc_data['Duration'], self.calc_data['Inlet_Pressure'] * 1e-6, color='r', s=3, label='Rechenwerte')
@@ -292,14 +309,39 @@ class Plotter:
         try:
             self.intervals[1]
             ax2 = ax.twinx()
-            ax2.plot(self.intervals[1], self.intervals[0], color='k', marker="o", ls="")
+            ax2.plot(self.intervals[1], self.intervals[0], color='g', marker="o", ls="")
             k_intervals_sorted = sorted(self.intervals[0])
             ax2.set_ylim(10 ** np.ceil(np.log10(k_intervals_sorted[-1])), 10 ** (np.ceil(np.log10(k_intervals_sorted[0])) - 1))
             ax2.set_yscale('log')
-            ax2.set_ylabel('Permeabilität [m²]', fontsize=16)
+            ax2.set_ylabel('Permeabilität [m²]', fontsize=16, color='g')
+            ax2.tick_params(axis='both', which='both', labelsize=16)
         except AttributeError:
             pass
-        plt.legend()
+        ax.legend()
+        plt.show()
+
+    def plot_detailed_chart(self):
+        fig = plt.figure(figsize=(18, 9))
+        ax = fig.add_subplot(2, 1, 1)
+        ax.semilogx(self.df['Duration'], self.df['Inlet_Pressure'], color='C0', linestyle='-', linewidth=2, label='Messwerte')
+        ax.scatter(self.df['Duration'], self.calc_data['Inlet_Pressure'] * 1e-6, color='r', s=3, label='Rechenwerte')
+        # ax.set_ylim([np.min(self.inlet_p), np.max(self.inlet_p) * 1e-6 + 0.02])
+        ax.set_xlim([1, 10 ** np.ceil(np.log10(self.calc_data.iloc[-1]['Duration']))])
+        ax.legend(loc='lower left', fontsize=12)
+        plt.title('Eingangsseite', fontsize=16)
+        ax.set_ylabel('Druck [MPa]', fontsize=16)
+        ax.grid(True, which='major')
+        ax.grid(True, which='minor', linestyle='--')
+
+        ax = fig.add_subplot(2, 1, 2)
+        ax.semilogx(self.df['Duration'], self.df['Outlet_Pressure'], color='C0', linestyle='-', linewidth=2, label='Messwerte')
+        ax.scatter(self.df['Duration'], self.calc_data['Outlet_Pressure'] * 1e-6, color='r', s=3, label='Rechenwerte')
+        ax.set_xlim([1, 10 ** np.ceil(np.log10(self.calc_data.iloc[-1]['Duration']))])
+        plt.title('Ausgangsseite', fontsize=16)
+        ax.set_xlabel('Zeit [s]', fontsize=16)
+        ax.set_ylabel('Druck [MPa]', fontsize=16)
+        ax.grid(True, which='major')
+        ax.grid(True, which='minor', linestyle='--')
         plt.show()
 
     def plot_select_interval(self):
@@ -323,18 +365,13 @@ class Plotter:
         ax.set_title('Messintervalle', fontsize=16)
         ax.set_xlabel('Messwerte', fontsize=16)
         ax.set_ylabel('Eingangsdruck in MPa', fontsize=16)
+        ax.tick_params(axis='both', which='major', labelsize=16)
         ax.grid()
         plt.show()
         return x_coordinates
 
     def setup_figure(self):
-        fig = plt.figure(figsize=(14, 8))
-        plt.title(self.name, fontsize=16)
-        plt.xlabel('Zeit in s', fontsize=16)
-        plt.ylabel('Druck in MPa', fontsize=16)
-        plt.grid(True, which='major')
-        plt.grid(True, which='minor', linestyle='--')
-        plt.grid(True)
+        pass
 
 
 class LinearSystem:
@@ -675,17 +712,52 @@ class Main:
             # print(GCI2/(2**fehlerordnung*GCI1))
             print()
 
-    def single_run(self, initial_guess):
+    def single_run(self, initial_guess, save=False):
         self.set_data('2KA')
         self.chamber_pressure, _ = LinearSystem(self.measured_data, self.general_data,
                                                 initial_guess).solve_linear_system()
         self.plot_result()
+        if save:
+            self.write_file(initial_guess)
 
-    def calculate_permeability(self, initial_guess, parameter='k'):
+    def calculate_permeability(self, initial_guess, parameter='k', save=False):
         self.set_data('2KA')
-        self.chamber_pressure, _ = Optimizer(self.measured_data, self.general_data,
-                                             initial_guess).nelder_mead(parameter)
+        self.chamber_pressure, self.min_result = Optimizer(self.measured_data, self.general_data,
+                                                           initial_guess).nelder_mead(parameter)
         self.plot_result()
+        if save:
+            self.write_file(initial_guess)
+
+    def write_file(self, initial_guess):
+        df = pd.concat([self.measured_data, self.chamber_pressure], axis=1)
+        if len(df.columns) == 7:
+            df.columns = ['Duration', 'Inlet_P_mea', 'Outlet_P_mea', 'Temperature', 'x', 'Inlet_P_cal', 'Outlet_P_cal']
+            df = df[['Duration', 'Inlet_P_mea', 'Inlet_P_cal', 'Outlet_P_mea', 'Outlet_P_cal', 'Temperature']]
+
+        df[['Inlet_P_mea', 'Outlet_P_mea']] = df[['Inlet_P_mea', 'Outlet_P_mea']].apply(lambda x: x * 1e5)
+
+        file_name, _ = os.path.splitext(os.path.split(self.path)[1])
+        path = 'C:\\Users\\Martin\\OneDrive\\Promotion\\PERM\\sim_data\\' + file_name + '.csv'
+
+        if len(self.min_result.x) == 1:
+            porosity = initial_guess[1] * 100
+        else:
+            porosity = self.min_result.x[1] * 100
+        permeability = self.min_result.x[0]
+        relative_error = round(self.min_result.fun, 4)
+
+        results = {'permeability': permeability,
+                   'porosity' : porosity,
+                   'relative_error': relative_error,
+                   'length': self.general_data.get('length'),
+                   'gas': self.general_data.get('gas')}
+        results = pd.DataFrame.from_dict(results, orient='index')
+        results.to_csv(path, header=False, sep=':', float_format='%.3f')
+
+        df.to_csv(path, index=False, mode='a', float_format='%.2f')
+
+
+
 
     def optimize_reaktor(self, initial_guess, parameter='k'):
         self.set_data('Reaktor')
@@ -693,19 +765,20 @@ class Main:
                                              initial_guess).nelder_mead(parameter)
         self.plot_result()
 
-    def optimize_measurement_intervals(self, initial_guess):
+    def optimize_measurement_intervals(self, initial_guess, parameter='k'):
         time_interval = []
         k_interval = []
         self.general_data = MeasurementData(self.path).get_general_data()
         for step in range(1,6):
             self.measured_data = MeasurementData(self.path).interpolate_data(step=step)
-            self.chamber_pressure, self.min_result = Optimizer(self.measured_data, self.general_data, initial_guess).nelder_mead()
+            self.chamber_pressure, self.min_result = Optimizer(self.measured_data, self.general_data, initial_guess).nelder_mead(parameter)
             k_interval.append(self.min_result.x[0])
             time_interval.append(self.measured_data['Duration'].max())
         # TODO: Variable name
+        filename, _ = os.path.splitext(os.path.split(self.path)[1])
         plot_result = Plotter(self.measured_data, **{'calc_data': self.chamber_pressure,
                                                      'intervals': [k_interval, time_interval],
-                                                     'name': 'Messung'})
+                                                     'name': filename})
         plot_result.plot_calculation_chart()
 
     def optimize_measurement_manual(self, initial_guess, parameter='k'):
@@ -737,6 +810,7 @@ class Main:
     def set_data(self, measurement_typ='2KA'):
         if measurement_typ == '2KA':
             self.measured_data = MeasurementData(self.path).interpolate_data()
+
             self.general_data = MeasurementData(self.path).get_general_data()
         elif measurement_typ == 'Reaktor':
             self.measured_data = MeasurementDataReaktor(self.path).interpolate_data()
@@ -749,9 +823,11 @@ class Main:
         filename, _ = os.path.splitext(os.path.split(self.path)[1])
         plot_result = Plotter(self.measured_data, **{'calc_data': self.chamber_pressure, 'name': filename})
         plot_result.plot_calculation_chart()
+        plot_result.plot_detailed_chart()
 
 #HY_V9 3.2e-20, 0.001
-x = Main('C:\\Users\\Martin\\OneDrive\\Promotion\\PERM\\raw_data\\HY_Sx2_CH4.txt')
-x.single_run([1e-17, 0.001])
+x = Main('C:\\Users\\Martin\\OneDrive\\Promotion\\PERM\\raw_data\\HY_S3.txt')
+x.calculate_permeability([1e-21, 0.001], parameter='both', save=True)
+
 
 
