@@ -64,8 +64,11 @@ class Data:
 
     def set_start_stop(self, df):
         df['open'] = df['Inlet_Pressure'] < df['Inlet_Pressure'].max() * 0.98
-        open = df.index[df['open'] == True].tolist()[0]
-        self.start = df.iloc[open:]['Inlet_Pressure'].idxmax()
+        try:
+            open = df.index[df['open'] == True].tolist()[0]
+            self.start = df.iloc[open:]['Inlet_Pressure'].idxmax()
+        except IndexError:
+            self.start = 1
 
         df['pressure_equilibrium'] = df['Inlet_Pressure'] <= df['Outlet_Pressure']
         try:
