@@ -39,7 +39,7 @@ class Measurement:
             porosity = guess[1]
         self.sample_data.update({'k': result.x[0],
                                  'n': porosity,
-                                 'error': result.fun})
+                                 'error': result.fun / 100})
 
     def save_results(self):
         df = self.df_100[['Duration', 'DateTime', 'Inlet_Pressure', 'Inlet_Pressure_Cal', 'Outlet_Pressure',

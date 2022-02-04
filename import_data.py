@@ -116,6 +116,14 @@ class Data:
         df_final_100 = self.interpolate(df_final)
         return df_final_100, df_final
 
+    def drop_duplicates(self, df):
+        rows = len(df)
+        df.drop_duplicates(ignore_index=True, inplace=True)
+        if rows > len(df):
+            df.to_csv(self.path, sep=' ', index=False)
+            print(f'Dropped {rows-len(df)} duplicate rows.')
+        return df
+
     def sample_data(self):
         my_dict = self.get_core_dimensions()
         unit = self.get_unit_dimensions()
