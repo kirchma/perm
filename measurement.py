@@ -18,14 +18,17 @@ class Measurement:
     def calculate_permeability(self, guess, parameter='k'):
         self.set_data()
         result = Optimizer(self.df_100, self.sample_data, guess)
-        result = result.nelder_mead(parameter)
+        result, opt_steps = result.nelder_mead(parameter)
 
         plot = Plotter(self.df_100, **{'name': self.file_name})
         plot.result_chart()
 
         self.add_results(result, guess)
-        self.save_adjusted_measurement_file()
-        self.save_results()
+        user_input = input('Ergebnis abspeichern? (y)')
+        if user_input == 'y':
+            self.save_adjusted_measurement_file()
+            self.save_results()
+            self.save_optimization_steps(opt_steps)
 
     def set_data(self):
         data = Data(self.path)
@@ -54,6 +57,11 @@ class Measurement:
     def save_adjusted_measurement_file(self):
         path = '/Users/mkirch/OneDrive/Promotion/PERM/raw_data/' + self.file_name + '_adjusted.csv'
         self.df_final.to_csv(path, sep=',', index=False, float_format='%.2f')
+
+    def save_optimization_steps(self, opt_steps):
+        df = pd.DataFrame(opt_steps[1:], columns=opt_steps[0])
+        path = '/Users/mkirch/OneDrive/Promotion/PERM/sim_data/' + self.file_name + '_opt_steps.txt'
+        df.to_csv(path, index=False, float_format='%.6g')
 
 
 class MeasurementReaktor(Measurement):

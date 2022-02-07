@@ -11,6 +11,7 @@ class Optimizer:
         self.sample_data = sample_data
         self.guess = guess
         self.data = None
+        self.optimization_steps = [['k', 'n', 'e']]
 
     def nelder_mead(self, parameter):
         if parameter == 'k':
@@ -26,7 +27,7 @@ class Optimizer:
         self.df_100['Inlet_Pressure_Cal'] = pd.DataFrame.from_dict(self.data['inlet_pressure_calculated'])
         self.df_100['Outlet_Pressure_Cal'] = pd.DataFrame.from_dict(self.data['outlet_pressure_calculated'])
 
-        return min_result
+        return min_result, self.optimization_steps
 
     def optimize_function(self, guess, parameter):
         if parameter == 'k':
@@ -36,6 +37,7 @@ class Optimizer:
 
         self.data = LinearSystem(self.df_100, self.sample_data, guess).solve_linear_system()
         error = self.calculate_error()
+        self.optimization_steps.append([guess[0], guess[1], error/100])
         print(f'k = {guess[0]:.4} m^2, n = {guess[1]:.4}, e = {error:.3} %')
         return error
 
@@ -56,6 +58,6 @@ class Optimizer:
         print(f'\n Calculation finished: {min_result.message} \n'
               f'\tNumber of iterations: {min_result.nit} \n'
               f'\tNumber of function evaluations: {min_result.nfev} \n'
-              f'\tPermeability: {min_result.x[0]:.2} m^2 \n'
+              f'\tPermeability: {min_result.x[0]:.3} m^2 \n'
               f'\tPorosity: \n'
               f'\tRelative error: {round(min_result.fun, 2)} %')
