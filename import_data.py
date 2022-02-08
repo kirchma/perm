@@ -12,6 +12,7 @@ class Data:
     def __init__(self, path):
         self.path = path
         self.file_name, _ = os.path.splitext(os.path.split(path)[1])
+        self.path_raw, _ = os.path.splitext(os.path.split(path)[0])
         self.start = None
         self.stop = None
 
@@ -109,10 +110,15 @@ class Data:
         df['Duration'] = df['Duration'] - df.iloc[0]['Duration'] + 1
         return df
 
-    def pressure_data(self):
+    def new_pressure_file(self):
         df = self.read_file(self.path)
         df = self.convert_units(df)
         df_final = self.adjust_measurement_interval(df)
+        df_final_100 = self.interpolate(df_final)
+        return df_final_100, df_final
+
+    def adjusted_pressure_file(self):
+        df_final = pd.read_csv(os.path.join(self.path_raw, self.file_name + '_adjusted.csv'), parse_dates=['DateTime'])
         df_final_100 = self.interpolate(df_final)
         return df_final_100, df_final
 
