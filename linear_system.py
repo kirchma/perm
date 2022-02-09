@@ -1,7 +1,9 @@
 import numpy as np
+import pandas as pd
 import scipy.sparse
 import scipy.sparse.linalg
 import CoolProp.CoolProp as cp
+import plotly.express as px
 
 
 class LinearSystem:
@@ -52,17 +54,29 @@ class LinearSystem:
     def iterate_nonlinear_parameters(self, sample_pressure):
         i = 0
         difference = 1
+        #difference_list = []
 
         _, solution_vector = self.get_linear_system(sample_pressure)
-        while difference > 1e-4 and i <= 10:
+        while difference > 1e-5 and i <= 10:
             coefficient_matrix, _ = self.get_linear_system(sample_pressure)
             sample_pressure_new = scipy.sparse.linalg.spsolve(coefficient_matrix, solution_vector)
             difference = self.l2_norm(sample_pressure_new, sample_pressure)
             sample_pressure = sample_pressure_new
             i += 1
-        #A, b = self.get_linear_system(sample_pressure)
-        #sample_pressure = scipy.sparse.linalg.spsolve(A, b)
+            #difference_list.append(difference)
+
+        '''
+        df = pd.DataFrame(difference_list, columns=['difference'])
+        fig = px.line(df, x=df.index, y='difference', log_y=True)
+        fig.show()
+        exit()
+        '''
         return sample_pressure
+
+    @staticmethod
+    def residuum(A, x_guess, b):
+        r = abs(np.sum((A*x_guess - b) / b))
+        return r
 
     def get_linear_system(self, sample_pressure):
         main_diagonal, off_diagonal, solution_vector = self.build_diagonals(sample_pressure)
