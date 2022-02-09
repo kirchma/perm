@@ -17,6 +17,37 @@ class Measurement:
         self.df_final = None
         self.sample_data = None
 
+    def calculate_uncertainty(self, guess, parameter='k'):
+        df_opt = pd.DataFrame()
+        for i in range(4):
+            self.set_adjusted_data()
+            if i == 1:
+                self.df_100['Inlet_Pressure'] = self.df_100['Inlet_Pressure'] + self.sample_data['uncertainty_inlet']
+                self.df_100['Outlet_Pressure'] = self.df_100['Outlet_Pressure'] - self.sample_data['uncertainty_outlet']
+                self.df_100['Temperature'] = self.df_100['Temperature'] - 2
+                self.sample_data['length'] = self.sample_data['length'] * 0.995
+                self.sample_data['diameter'] = self.sample_data['diameter'] * 1.005
+                self.sample_data['inlet_chamber_volume'] = self.sample_data['inlet_chamber_volume'] * 0.99
+                self.sample_data['outlet_chamber_volume'] = self.sample_data['outlet_chamber_volume'] * 0.99
+            elif i == 2:
+                self.df_100['Inlet_Pressure'] = self.df_100['Inlet_Pressure'] - self.sample_data['uncertainty_inlet']
+                self.df_100['Outlet_Pressure'] = self.df_100['Outlet_Pressure'] + self.sample_data['uncertainty_outlet']
+                self.df_100['Temperature'] = self.df_100['Temperature'] + 2
+                self.sample_data['length'] = self.sample_data['length'] * 1.005
+                self.sample_data['diameter'] = self.sample_data['diameter'] * 0.995
+                self.sample_data['inlet_chamber_volume'] = self.sample_data['inlet_chamber_volume'] * 1.01
+                self.sample_data['outlet_chamber_volume'] = self.sample_data['outlet_chamber_volume'] * 1.01
+            elif i == 3:
+                parameter = 'k'
+
+            result = Optimizer(self.df_100, self.sample_data, guess)
+            result, opt_steps = result.nelder_mead(parameter)
+            df_opt = pd.concat([df_opt, pd.DataFrame(opt_steps[1:], columns=opt_steps[0])], axis=1)
+            i += 1
+
+        path = os.path.join(self.path_sim, self.file_name + '_uncertainty.txt')
+        df_opt.to_csv(path, index=False, float_format='%.6g')
+
     def calculate_permeability(self, guess, parameter='k'):
         if self.find_file():
             self.set_adjusted_data()

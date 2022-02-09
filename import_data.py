@@ -112,6 +112,7 @@ class Data:
 
     def new_pressure_file(self):
         df = self.read_file(self.path)
+        df = self.drop_duplicates(df)
         df = self.convert_units(df)
         df_final = self.adjust_measurement_interval(df)
         df_final_100 = self.interpolate(df_final)
@@ -145,10 +146,13 @@ class Data:
         diameter = database.loc[self.file_name, 'diameter']
         area = np.pi * 0.25 * diameter**2
         gas = database.loc[self.file_name, 'gas']
+        inlet, outlet = self.get_uncertainties(database)
         my_dict = {'length': length,
                    'diameter': diameter,
                    'area': area,
-                   'gas': gas}
+                   'gas': gas,
+                   'uncertainty_inlet': inlet,
+                   'uncertainty_outlet': outlet}
         return my_dict
 
     def get_unit_dimensions(self):
@@ -161,6 +165,13 @@ class Data:
         filt = units['number'] == unit
         volume = units.loc[filt, ['inlet_chamber_in_ml', 'outlet_chamber_in_ml']]
         return volume.values[0] * ml_to_m3
+
+    def get_uncertainties(self, database):
+        inlet = database.loc[self.file_name, 'uncertainty_inlet']
+        outlet = database.loc[self.file_name, 'uncertainty_outlet']
+        inlet = float(inlet.split('*')[0]) * float(inlet.split('*')[1])
+        outlet = float(outlet.split('*')[0]) * float(outlet.split('*')[1])
+        return inlet, outlet
 
 
 class DataReaktor(Data):
