@@ -31,6 +31,7 @@ class LinearSystem:
             self.data['inlet_pressure_calculated'][step+1] = sample_pressure[0]
             self.data['outlet_pressure_calculated'][step+1] = sample_pressure[-1]
 
+        self.data.update({'cell_pressure': sample_pressure})
         return self.data
 
     def get_initial_pressure(self):

@@ -3,6 +3,10 @@ import pandas as pd
 from import_data import Data, DataReaktor
 import os
 from optimize import Optimizer
+from linear_system import LinearSystem
+import numpy as np
+from scipy.interpolate import interp1d
+import plotly.express as px
 from plots import Plotter, PlotterReaktor
 
 
@@ -16,6 +20,68 @@ class Measurement:
         self.df_100 = None
         self.df_final = None
         self.sample_data = None
+
+    def richardson_extrapolation(self, guess):
+        grid_dimensions = [100, 50, 25]
+        mesh_refinement_ratio = grid_dimensions[0] / grid_dimensions[1]
+        pressures = []
+
+        for i in range(len(grid_dimensions)):
+            LinearSystem.number_of_cells = grid_dimensions[i]
+            self.set_adjusted_data()
+            data = LinearSystem(self.df_100, self.sample_data, guess).solve_linear_system()
+            pressures.append(data['cell_pressure'])
+
+        # interpolate cell pressures to get same x location as the smallest grid
+        length = self.sample_data['length'] * 100
+        x_axis = [np.linspace(0, length, grid_dimensions) for grid_dimensions in grid_dimensions]
+        f_0 = interp1d(x_axis[0], pressures[0])
+        f_1 = interp1d(x_axis[1], pressures[1])
+        pressures[0] = f_0(x_axis[2])
+        pressures[1] = f_1(x_axis[2])
+
+        order_of_convergence = np.log(abs((pressures[1]-pressures[2]) / (pressures[0]-pressures[1]))) \
+                            / np.log(mesh_refinement_ratio)
+        p_exact = pressures[0] + (pressures[0] - pressures[1]) \
+                                       / (mesh_refinement_ratio**order_of_convergence - 1)
+        relative_error_1 = (pressures[1] - pressures[0]) / pressures[0]
+        relative_error_2 = (pressures[2] - pressures[1]) / pressures[1]
+        GCI_1 = (1.25 * abs(relative_error_1)) / (mesh_refinement_ratio**order_of_convergence - 1)
+        GCI_2 = (1.25 * abs(relative_error_2)) / (mesh_refinement_ratio**order_of_convergence - 1)
+        asymptotic_range = GCI_2 / (mesh_refinement_ratio**order_of_convergence * GCI_1)
+
+        fig = px.scatter(x=[0, 1, 2, 4],
+                         y=[p_exact[0], pressures[0][0], pressures[1][0], pressures[2][0]])
+        #fig.show()
+        print(f'''
+        --- Grid Convergence Study ---
+        
+        Number of Grids = {len(grid_dimensions)}
+        
+        Grid Size   Quantity (first cell | last cell)
+        1           {pressures[0][0]:.0f} | {pressures[0][-1]:.0f}
+        2           {pressures[1][0]:.0f} | {pressures[1][-1]:.0f}
+        4           {pressures[2][0]:.0f} | {pressures[2][-1]:.0f}
+        
+        Order of convergence p = {order_of_convergence.mean():.5f}
+        
+        Richardson Extrapolation: Calculated with the first and second finest grids.
+        
+                    Quantity (first cell | last cell)
+        p_exact     {p_exact[0]:.0f} | {p_exact[-1]:.0f}
+        
+        Grid Convergence Index - GCI
+        Factor of Safety = 1.25
+        
+        Grid        GCI in % (first cell | last cell | mean)
+        1 - 2       {GCI_1[0]*100:.4f} | {GCI_1[-1]*100:.4f} | {GCI_1.mean()*100:.4f}
+        2 - 4       {GCI_2[0]*100:.4f} | {GCI_2[-1]*100:.4f} | {GCI_2.mean()*100:.4f}
+        
+        Check the asymptotic range. A value of 1.0 indicates asymptotic range.
+        
+        range = {asymptotic_range.mean():.4f}
+        
+        ''')
 
     def calculate_uncertainty(self, guess, parameter='k'):
         df_opt = pd.DataFrame()
