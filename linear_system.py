@@ -4,6 +4,7 @@ import scipy.sparse
 import scipy.sparse.linalg
 import CoolProp.CoolProp as cp
 import plotly.express as px
+from import_data import Data
 
 
 class LinearSystem:
@@ -41,9 +42,9 @@ class LinearSystem:
         return sample_pressure
 
     def initialize_calculated_pressure(self):
-        inlet_pressure_calculated = np.ones(100)
+        inlet_pressure_calculated = np.ones(Data.number_of_time_steps)
         inlet_pressure_calculated[0] = self.data['inlet_pressure'][0]
-        outlet_pressure_calculated = np.ones(100)
+        outlet_pressure_calculated = np.ones(Data.number_of_time_steps)
         outlet_pressure_calculated[0] = self.data['outlet_pressure'][0]
         self.data.update({'inlet_pressure_calculated': inlet_pressure_calculated,
                           'outlet_pressure_calculated': outlet_pressure_calculated})

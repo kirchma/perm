@@ -23,11 +23,14 @@ class Measurement:
 
     def richardson_extrapolation(self, guess):
         grid_dimensions = [100, 50, 25]
+        time_steps = [200, 100, 50]
         mesh_refinement_ratio = grid_dimensions[0] / grid_dimensions[1]
         pressures = []
+        safety_factor = 3
 
         for i in range(len(grid_dimensions)):
             LinearSystem.number_of_cells = grid_dimensions[i]
+            Data.number_of_time_steps = time_steps[i]
             self.set_adjusted_data()
             data = LinearSystem(self.df_100, self.sample_data, guess).solve_linear_system()
             pressures.append(data['cell_pressure'])
@@ -46,12 +49,11 @@ class Measurement:
                                        / (mesh_refinement_ratio**order_of_convergence - 1)
         relative_error_1 = (pressures[1] - pressures[0]) / pressures[0]
         relative_error_2 = (pressures[2] - pressures[1]) / pressures[1]
-        GCI_1 = (1.25 * abs(relative_error_1)) / (mesh_refinement_ratio**order_of_convergence - 1)
-        GCI_2 = (1.25 * abs(relative_error_2)) / (mesh_refinement_ratio**order_of_convergence - 1)
+        GCI_1 = (safety_factor * abs(relative_error_1)) / (mesh_refinement_ratio**order_of_convergence - 1)
+        GCI_2 = (safety_factor * abs(relative_error_2)) / (mesh_refinement_ratio**order_of_convergence - 1)
         asymptotic_range = GCI_2 / (mesh_refinement_ratio**order_of_convergence * GCI_1)
 
-        fig = px.scatter(x=[0, 1, 2, 4],
-                         y=[p_exact[0], pressures[0][0], pressures[1][0], pressures[2][0]])
+        #fig = px.line(x=[0, 1, 2, 4],y=[p_exact[0], pressures[0][0], pressures[1][0], pressures[2][0]])
         #fig.show()
         print(f'''
         --- Grid Convergence Study ---
@@ -71,7 +73,7 @@ class Measurement:
         p_exact     {p_exact[0]:.0f} | {p_exact[-1]:.0f}
         
         Grid Convergence Index - GCI
-        Factor of Safety = 1.25
+        Factor of Safety = {safety_factor}
         
         Grid        GCI in % (first cell | last cell | mean)
         1 - 2       {GCI_1[0]*100:.4f} | {GCI_1[-1]*100:.4f} | {GCI_1.mean()*100:.4f}

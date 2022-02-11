@@ -8,6 +8,7 @@ from plots import Plotter, PlotterReaktor
 
 
 class Data:
+    number_of_time_steps = 100
 
     def __init__(self, path):
         self.path = path
@@ -84,7 +85,7 @@ class Data:
     @staticmethod
     def interpolate(df):
         start_date_in_seconds = (df['DateTime'] - dt.datetime(1970,1,1)).dt.total_seconds()[0] - 1
-        time_log_scale = np.geomspace(1, int(df['Duration'].max()), 100).round(2)
+        time_log_scale = np.geomspace(1, int(df['Duration'].max()), Data.number_of_time_steps).round(2)
 
         function_inlet = interp1d(df['Duration'], df['Inlet_Pressure'])
         function_outlet = interp1d(df['Duration'], df['Outlet_Pressure'])
