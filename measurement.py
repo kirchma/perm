@@ -21,7 +21,12 @@ class Measurement:
         self.df_final = None
         self.sample_data = None
 
-    def richardson_extrapolation(self, guess):
+    def calculate_uncertainty(self, guess):
+        solution = self.get_solution()
+        GCI = self.richardson_extrapolation(solution)
+        self.temp(guess, GCI)
+
+    def richardson_extrapolation(self, solution):
         grid_dimensions = [100, 50, 25]
         time_steps = [200, 100, 50]
         mesh_refinement_ratio = grid_dimensions[0] / grid_dimensions[1]
@@ -32,7 +37,7 @@ class Measurement:
             LinearSystem.number_of_cells = grid_dimensions[i]
             Data.number_of_time_steps = time_steps[i]
             self.set_adjusted_data()
-            data = LinearSystem(self.df_100, self.sample_data, guess).solve_linear_system()
+            data = LinearSystem(self.df_100, self.sample_data, solution).solve_linear_system()
             pressures.append(data['cell_pressure'])
 
         # interpolate cell pressures to get same x location as the smallest grid
@@ -52,18 +57,15 @@ class Measurement:
         GCI_1 = (safety_factor * abs(relative_error_1)) / (mesh_refinement_ratio**order_of_convergence - 1)
         GCI_2 = (safety_factor * abs(relative_error_2)) / (mesh_refinement_ratio**order_of_convergence - 1)
         asymptotic_range = GCI_2 / (mesh_refinement_ratio**order_of_convergence * GCI_1)
-
-        #fig = px.line(x=[0, 1, 2, 4],y=[p_exact[0], pressures[0][0], pressures[1][0], pressures[2][0]])
-        #fig.show()
         print(f'''
         --- Grid Convergence Study ---
         
         Number of Grids = {len(grid_dimensions)}
         
-        Grid Size   Quantity (first cell | last cell)
-        1           {pressures[0][0]:.0f} | {pressures[0][-1]:.0f}
-        2           {pressures[1][0]:.0f} | {pressures[1][-1]:.0f}
-        4           {pressures[2][0]:.0f} | {pressures[2][-1]:.0f}
+        Grid Size    Time Step      Quantity (first cell | last cell)
+            1           1           {pressures[0][0]:.0f} | {pressures[0][-1]:.0f}
+            2           2           {pressures[1][0]:.0f} | {pressures[1][-1]:.0f}
+            4           4           {pressures[2][0]:.0f} | {pressures[2][-1]:.0f}
         
         Order of convergence p = {order_of_convergence.mean():.5f}
         
@@ -84,22 +86,28 @@ class Measurement:
         range = {asymptotic_range.mean():.4f}
         
         ''')
+        return (GCI_1)
 
-    def calculate_uncertainty(self, guess, parameter='k'):
+    def temp(self, guess, GCI, parameter='both'):
         df_opt = pd.DataFrame()
+
         for i in range(4):
             self.set_adjusted_data()
             if i == 1:
-                self.df_100['Inlet_Pressure'] = self.df_100['Inlet_Pressure'] + self.sample_data['uncertainty_inlet']
-                self.df_100['Outlet_Pressure'] = self.df_100['Outlet_Pressure'] - self.sample_data['uncertainty_outlet']
+                self.df_100['Inlet_Pressure'] = (self.df_100['Inlet_Pressure'] +
+                                                 self.sample_data['uncertainty_inlet']) * (1 + base_error + GCI[0])
+                self.df_100['Outlet_Pressure'] = (self.df_100['Outlet_Pressure'] -
+                                                  self.sample_data['uncertainty_outlet']) * (1 + base_error + GCI[-1])
                 self.df_100['Temperature'] = self.df_100['Temperature'] - 2
                 self.sample_data['length'] = self.sample_data['length'] * 0.995
                 self.sample_data['diameter'] = self.sample_data['diameter'] * 1.005
                 self.sample_data['inlet_chamber_volume'] = self.sample_data['inlet_chamber_volume'] * 0.99
                 self.sample_data['outlet_chamber_volume'] = self.sample_data['outlet_chamber_volume'] * 0.99
             elif i == 2:
-                self.df_100['Inlet_Pressure'] = self.df_100['Inlet_Pressure'] - self.sample_data['uncertainty_inlet']
-                self.df_100['Outlet_Pressure'] = self.df_100['Outlet_Pressure'] + self.sample_data['uncertainty_outlet']
+                self.df_100['Inlet_Pressure'] = (self.df_100['Inlet_Pressure'] -
+                                                 self.sample_data['uncertainty_inlet']) * (1 + base_error + GCI[0])
+                self.df_100['Outlet_Pressure'] = (self.df_100['Outlet_Pressure'] +
+                                                  self.sample_data['uncertainty_outlet']) * (1 + base_error + GCI[-1])
                 self.df_100['Temperature'] = self.df_100['Temperature'] + 2
                 self.sample_data['length'] = self.sample_data['length'] * 1.005
                 self.sample_data['diameter'] = self.sample_data['diameter'] * 0.995
@@ -111,10 +119,12 @@ class Measurement:
             result = Optimizer(self.df_100, self.sample_data, guess)
             result, opt_steps = result.nelder_mead(parameter)
             df_opt = pd.concat([df_opt, pd.DataFrame(opt_steps[1:], columns=opt_steps[0])], axis=1)
+            base_error = result.fun / 100
             i += 1
 
         path = os.path.join(self.path_sim, self.file_name + '_uncertainty.txt')
         df_opt.to_csv(path, index=False, float_format='%.6g')
+        return df_opt
 
     def calculate_permeability(self, guess, parameter='k'):
         if self.find_file():
@@ -134,6 +144,11 @@ class Measurement:
             self.save_adjusted_measurement_file()
             self.save_results()
             #self.save_optimization_steps(opt_steps)
+
+    def get_solution(self):
+        df = pd.read_csv(os.path.join(self.path_sim, self.file_name + '.csv'),
+                         nrows=8, sep=':', index_col=0, header=None)
+        return [float(df.loc['k', 1]), float(df.loc['n', 1])]
 
     def set_adjusted_data(self):
         data = Data(self.path)
