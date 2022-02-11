@@ -6,7 +6,6 @@ from optimize import Optimizer
 from linear_system import LinearSystem
 import numpy as np
 from scipy.interpolate import interp1d
-import plotly.express as px
 from plots import Plotter, PlotterReaktor
 
 
@@ -86,9 +85,11 @@ class Measurement:
         range = {asymptotic_range.mean():.4f}
         
         ''')
-        return (GCI_1)
+        return GCI_1
 
     def temp(self, guess, GCI, parameter='both'):
+        LinearSystem.number_of_cells = 50
+        Data.number_of_time_steps = 100
         df_opt = pd.DataFrame()
 
         for i in range(4):
@@ -97,7 +98,7 @@ class Measurement:
                 self.df_100['Inlet_Pressure'] = (self.df_100['Inlet_Pressure'] +
                                                  self.sample_data['uncertainty_inlet']) * (1 + base_error + GCI[0])
                 self.df_100['Outlet_Pressure'] = (self.df_100['Outlet_Pressure'] -
-                                                  self.sample_data['uncertainty_outlet']) * (1 + base_error + GCI[-1])
+                                                  self.sample_data['uncertainty_outlet']) * (1 - base_error - GCI[-1])
                 self.df_100['Temperature'] = self.df_100['Temperature'] - 2
                 self.sample_data['length'] = self.sample_data['length'] * 0.995
                 self.sample_data['diameter'] = self.sample_data['diameter'] * 1.005
@@ -105,7 +106,7 @@ class Measurement:
                 self.sample_data['outlet_chamber_volume'] = self.sample_data['outlet_chamber_volume'] * 0.99
             elif i == 2:
                 self.df_100['Inlet_Pressure'] = (self.df_100['Inlet_Pressure'] -
-                                                 self.sample_data['uncertainty_inlet']) * (1 + base_error + GCI[0])
+                                                 self.sample_data['uncertainty_inlet']) * (1 - base_error - GCI[0])
                 self.df_100['Outlet_Pressure'] = (self.df_100['Outlet_Pressure'] +
                                                   self.sample_data['uncertainty_outlet']) * (1 + base_error + GCI[-1])
                 self.df_100['Temperature'] = self.df_100['Temperature'] + 2
@@ -143,11 +144,10 @@ class Measurement:
         if user_input == 'y':
             self.save_adjusted_measurement_file()
             self.save_results()
-            #self.save_optimization_steps(opt_steps)
 
     def get_solution(self):
         df = pd.read_csv(os.path.join(self.path_sim, self.file_name + '.csv'),
-                         nrows=8, sep=':', index_col=0, header=None)
+                         nrows=10, sep=':', index_col=0, header=None)
         return [float(df.loc['k', 1]), float(df.loc['n', 1])]
 
     def set_adjusted_data(self):
@@ -174,6 +174,8 @@ class Measurement:
                           'Outlet_Pressure_Cal', 'Confining_Pressure', 'Temperature']]
 
         path = os.path.join(self.path_sim, self.file_name + '.csv')
+        del self.sample_data['uncertainty_inlet']
+        del self.sample_data['uncertainty_outlet']
         df_res = pd.DataFrame.from_dict(self.sample_data, orient='index')
         df_res.to_csv(path, header=False, sep=':', float_format='%.4f')
         df.to_csv(path, index=False, mode='a', float_format='%.2f')
@@ -182,11 +184,6 @@ class Measurement:
     def save_adjusted_measurement_file(self):
         path = os.path.join(self.path_raw, self.file_name + '_adjusted.csv')
         self.df_final.to_csv(path, sep=',', index=False, float_format='%.2f')
-
-    def save_optimization_steps(self, opt_steps):
-        df = pd.DataFrame(opt_steps[1:], columns=opt_steps[0])
-        path = os.path.join(self.path_sim, self.file_name + '_opt_steps.txt')
-        df.to_csv(path, index=False, float_format='%.6g')
 
     def find_file(self):
         for root, dirs, files in os.walk(self.path_raw):
