@@ -129,7 +129,11 @@ class Measurement:
 
     def calculate_permeability(self, guess, parameter='k'):
         if self.find_file():
-            self.set_adjusted_data()
+            user_input = input('Bereits angepasste Messdaten nutzen? (y/n')
+            if user_input == 'y':
+                self.set_adjusted_data()
+            elif user_input == 'n':
+                self.set_data()
         else:
             self.set_data()
 
