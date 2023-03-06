@@ -47,10 +47,16 @@ class Optimizer:
         p_out_ref = self.data['outlet_pressure']
         p_out = self.data['outlet_pressure_calculated']
 
-        absolute_magnitude = np.sqrt(sum(p_in_ref**2 + p_out_ref**2))
-        difference = abs(p_in_ref - p_in) + abs(p_out_ref - p_out)
-        absolute_error = np.sqrt(sum(difference**2))
-        relative_error = absolute_error / absolute_magnitude * 100
+        if self.sample_data['outlet_chamber_volume'] == 0:
+            absolute_magnitude = np.sqrt(sum(p_in_ref ** 2))
+            difference = abs(p_in_ref - p_in)
+            absolute_error = np.sqrt(sum(difference ** 2))
+            relative_error = absolute_error / absolute_magnitude * 100
+        else:
+            absolute_magnitude = np.sqrt(sum(p_in_ref**2 + p_out_ref**2))
+            difference = abs(p_in_ref - p_in) + abs(p_out_ref - p_out)
+            absolute_error = np.sqrt(sum(difference**2))
+            relative_error = absolute_error / absolute_magnitude * 100
         return relative_error
 
     @staticmethod
@@ -58,6 +64,6 @@ class Optimizer:
         print(f'\n Calculation finished: {min_result.message} \n'
               f'\tNumber of iterations: {min_result.nit} \n'
               f'\tNumber of function evaluations: {min_result.nfev} \n'
-              f'\tPermeability: {min_result.x[0]:.3} m^2 \n'
+              f'\tPermeability: {min_result.x[0]:.6} m^2 \n'
               f'\tPorosity: \n'
               f'\tRelative error: {round(min_result.fun, 2)} %')
