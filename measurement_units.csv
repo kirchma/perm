@@ -3,6 +3,11 @@ institut_1 1 144.39 140.51
 institut_2 2 190.38 192.52
 institut_3 3 349.71 347.6
 zeche_swagelok 4 164.3 165.4
-zeche_hps 5 167.8 168
+zeche_hps 5 158.36 162.96
 zeche_hps_umbau 6 168.3 169.9
-zeche_reaktor 7 1177.42 1113.14
+zeche_reaktor 7 1160 1159.29
+zeche_hps_1 8 158.36 162.96
+zeche_hps_2 9 157.17 160.74
+zeche_hps_1_ohne_kammer 10 16.96 20.76
+zeche_hps_2_ohne_kammer 11 16.43 19.92
+institut_4 12 20 0
