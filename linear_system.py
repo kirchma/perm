@@ -1,10 +1,9 @@
 import numpy as np
-import pandas as pd
 import scipy.sparse
 import scipy.sparse.linalg
 import CoolProp.CoolProp as cp
-import plotly.express as px
 from import_data import Data
+import settings
 
 
 class LinearSystem:
@@ -57,22 +56,19 @@ class LinearSystem:
         i = 0
         difference = 1
         #difference_list = []
+        #residuum_list = []
 
         _, solution_vector = self.get_linear_system(sample_pressure)
         while difference > 1e-5 and i <= 10:
             coefficient_matrix, _ = self.get_linear_system(sample_pressure)
             sample_pressure_new = scipy.sparse.linalg.spsolve(coefficient_matrix, solution_vector)
             difference = self.l2_norm(sample_pressure_new, sample_pressure)
+            #residuum = self.residuum(coefficient_matrix, sample_pressure, solution_vector)
             sample_pressure = sample_pressure_new
             i += 1
             #difference_list.append(difference)
+            #residuum_list.append(residuum)
 
-        '''
-        df = pd.DataFrame(difference_list, columns=['difference'])
-        fig = px.line(df, x=df.index, y='difference', log_y=True)
-        fig.show()
-        exit()
-        '''
         return sample_pressure
 
     @staticmethod
@@ -126,13 +122,18 @@ class LinearSystem:
             parameter = ['ISOTHERMAL_COMPRESSIBILITY', 'VISCOSITY', 'DMASS']
             result = cp.PropsSI(parameter, 'T', self.data['temperature'].mean(), 'P', pressure, self.sample['gas'])
             result = result.T
+
+            #result[0] = result[0] * settings.compressibility_multiplier
+            #result[1] = result[1] * settings.viscosity_multiplier
+            #result[2] = result[2] * settings.density_multiplier
         except:
             result = [np.zeros(self.number_of_cells),np.zeros(self.number_of_cells),np.zeros(self.number_of_cells)]
         return result
 
     @staticmethod
     def l2_norm(p, p_ref):
-        l2_diff = np.sqrt(np.sum((p - p_ref) ** 2))
-        l2_ref = np.sqrt(np.sum(p_ref ** 2))
-        return l2_diff / l2_ref
+        #l2_diff = np.sqrt(np.sum((p - p_ref) ** 2))
+        #l2_ref = np.sqrt(np.sum(p_ref ** 2))
+        #return l2_diff / l2_ref
+        return np.linalg.norm(p-p_ref, 2) / np.linalg.norm(p_ref, 2)
 
