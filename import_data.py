@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from scipy.interpolate import interp1d
 import datetime as dt
+import CoolProp.CoolProp as cp
 
 from plots import Plotter, PlotterReaktor
 
@@ -76,16 +77,29 @@ class Data:
                     self.stop = df['Duration'].sub(int(stop)).abs().idxmin()
 
     def show_plot(self, df):
+        #df = self.calculate_k_analytic(df)
         plot = Plotter(df, **{'start': self.start, 'stop': self.stop, 'name': self.file_name})
         plot.raw_data_chart()
         user_input = input('Ist die Messzeit in Ordnung? (y) falls nicht bitte neue Werte für Beginn und '
                            'Ende der Messung angeben (start, ende)')
         return user_input
 
+    def calculate_k_analytic(self, df):
+        sample = self.sample_data()
+        df['Viscosity'] = cp.PropsSI('VISCOSITY', 'T', df['Temperature'].to_list(),
+                                     'P', df['Outlet_Pressure'].to_list(), sample['gas'])
+        V = sample['outlet_chamber_volume']
+        L = sample['length']
+        A = sample['area']
+
+        df['k'] = - ((V * df['Viscosity'] * 2 * L * df['Outlet_Pressure'].diff()) /
+                     (A * (df['Outlet_Pressure']**2 - df['Inlet_Pressure']**2) * df['Duration'].diff()))
+        return df
+
     @staticmethod
     def interpolate(df):
         start_date_in_seconds = (df['DateTime'] - dt.datetime(1970,1,1)).dt.total_seconds()[0] - 1
-        time_log_scale = np.geomspace(1, int(df['Duration'].max()), Data.number_of_time_steps).round(2)
+        time_log_scale = np.geomspace(int(df['Duration'].min()), int(df['Duration'].max()), Data.number_of_time_steps).round(2)
 
         function_inlet = interp1d(df['Duration'], df['Inlet_Pressure'])
         function_outlet = interp1d(df['Duration'], df['Outlet_Pressure'])
@@ -152,8 +166,8 @@ class Data:
                    'diameter': diameter,
                    'area': area,
                    'gas': gas,
-                   'uncertainty_inlet': inlet,
-                   'uncertainty_outlet': outlet}
+                   'inlet_sensor': inlet,
+                   'outlet_sensor': outlet}
         return my_dict
 
     def get_unit_dimensions(self):
@@ -170,8 +184,8 @@ class Data:
     def get_uncertainties(self, database):
         inlet = database.loc[self.file_name, 'uncertainty_inlet']
         outlet = database.loc[self.file_name, 'uncertainty_outlet']
-        inlet = float(inlet.split('*')[0]) * float(inlet.split('*')[1])
-        outlet = float(outlet.split('*')[0]) * float(outlet.split('*')[1])
+        inlet = {'range': float(inlet.split('*')[0]), 'error': float(inlet.split('*')[1])}
+        outlet = {'range': float(outlet.split('*')[0]), 'error': float(outlet.split('*')[1])}
         return inlet, outlet
 
 
@@ -221,6 +235,11 @@ class DataReaktor(Data):
                                    'Confining_Pressure_Reactor', 'Confining_Pressure_Sample', 'Temperature'])
         df['DateTime'] = pd.to_datetime(df['Duration']+start_date_in_seconds, unit='s')
         return df
+
+    def adjusted_pressure_file(self):
+        df_final = pd.read_csv(os.path.join(self.path_raw, self.file_name + '_adjusted.csv'), parse_dates=['DateTime'])
+        df_final_100 = self.interpolate(df_final)
+        return df_final_100, df_final
 
     def get_core_dimensions(self):
         database = self.read_file('database_reaktor.csv')
